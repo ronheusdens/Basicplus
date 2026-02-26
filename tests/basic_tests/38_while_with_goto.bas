@@ -1,0 +1,9 @@
+10 REM Test WHILE with GOTO inside
+20 X = 0
+30 WHILE X < 5
+40   IF X = 3 THEN GOTO 60
+50   PRINT X
+60   X = X + 1
+70 WEND
+80 PRINT "Finished"
+90 END

@@ -1,0 +1,19 @@
+Testing IF/THEN/ELSE...
+
+Test 1: PASS
+Test 2: PASS
+Test 3: PASS
+Test 4: PASS
+Test 5: PASS
+Test 6: PASS
+Test 7: PASS
+Test 8: PASS
+Test 9: PASS
+Test 10: PASS - Did not jump
+Test 11: PASS - In range
+Test 12: PASS - OR evaluated correctly
+Test 13: PASS - OR with GOTO worked
+Test 14: PASS - AND evaluated correctly
+Test 15: PASS - AND short-circuit worked
+
+All IF/THEN/ELSE tests complete!

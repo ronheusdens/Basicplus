@@ -1,0 +1,7 @@
+RANDOM ACCESS TEST
+File position after write: 5
+File size: 5
+First byte: 65
+Second byte: 66
+Position after 2 GETs: 2
+OK

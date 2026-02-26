@@ -1,0 +1,16 @@
+Testing PRINT@ cursor positioning...
+
+[1;1HTest 1: Position 0
+
+[1;65HTest 2: Position 64 (row 1)
+
+[2;49HTest 3: Position 128 (row 2)
+
+[3;43HTest 4: Calculated position
+
+[4;17HA[4;21HB[4;25HC
+
+[5;11HTest 6: Expression (5,10)
+
+
+All PRINT@ tests complete!

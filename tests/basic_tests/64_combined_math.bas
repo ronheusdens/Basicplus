@@ -1,0 +1,8 @@
+10 REM Test combined math functions
+20 PRINT "Combined MATH tests:"
+30 PRINT SIN(0)
+40 PRINT COS(0)
+50 PRINT LOG(EXP(1))
+60 PRINT EXP(LN(10))
+70 PRINT SQR(LOG(100))
+80 END

@@ -1,0 +1,226 @@
+Create an interpreter for  BASIC to be implemented in c99 or later. It should accept the source file as the first argument and run the script.
+Your target for functionality is microsoft BASIC level 2 equivalency (supporting DIM, GOSUB, READ, DATA etc), and you should be as close to source code compatible with the Microsoft BASIC for Tandy TRS-80 interpreter as possible. Use https://www.trs-80.com/sub-reference-level-2-basic.htm for reference.
+Use clang preferably as compliler for macos.
+Create a makefile to build the application on both MacOS (both arm and intel) and Linux (x64). 
+Build and test your code until it passes all tests in suite 'basic_tests.zip'
+Your code must run on MacOS and Linux, but you can use conditional compilation to achieve that where required. 
+When not existent, add a new BASIC command called "sleep" that accepts a number of ticks to sleep, so SLEEP(10) would sleep for ten seconds.  
+Your makefile should use uname to detect  between macos ARM and Intel and build for it if detected.
+Make the code as performant as possible when executing script. 
+
+
+update the interpreter so:
+- it can stop a running program gracefully with cntrl-C returning to the prompt and not exitting the interpreter; KW EXIT to exit the interpreter 
+- support LOAD(from path) and SAVE(to path) to load .bas files; (like in Disk BASIC of TRS80 Model 3)
+- signal error when trying to execute unknown Keyword KW
+- in case of identical linenumbers: execute last line with that linenumber (overwrite the previous line with that linenumber)
+In short, make the interactive interpreter better at handling the editing of programs.
+
+LEVEL II BASIC STATEMENTS
+
+Branches
+GOTO n
+IF : THEN n
+IF : THEN . .
+IF : THEN . ELSE . .
+ON : GOTO l,m,n, . . .
+
+Cassette Tape
+INPUT #-1, list
+PRINT #-1, list
+
+Commands:
+AUTO n,v
+CLEAR k
+CLOAD "string"
+CLOAD? "string"
+CONT
+CSAVE "string"
+DELETE l-m
+EDIT n
+LIST l-m
+NEW
+RUN n
+SYSTEM
+TROFF
+TRON
+
+Data Tables and Arrays:
+DATA list
+DIM name (dim1,dim2, . . .dimk)
+READ list
+RESTORE
+
+Define Variable Type:
+DEFDBL letter range
+DEFINT letter range
+DEFSNG letter range
+DEFSTR letter range
+
+Error Functions:
+ERL
+ERR/2 + 1
+ERROR code
+ON ERROR GOTO n
+RESUME n
+
+Functions:
+ABS(e)
+ATN(e)
+CDBL(e)
+CINT(e)
+COS(e)
+CSNG(e)
+EXP(e)
+FIX(e)
+INT(e)
+LOG(e)
+RANDOM
+RND(e)
+SGN(e)
+SIN(e)
+SQR(e)
+TAN(e)
+
+Graphics:
+CLS
+POINT(x,y)
+POS()
+RESET(x,y)
+SET(x,y)
+
+Input:
+INPUT list
+INPUT “string”;list
+INP(port)
+INKEY$
+
+Loop Control:
+FOR name = e TO e STEP e
+NEXT name
+
+Machine Language:
+PEEK(address)
+POKE address,v
+USR()
+VARPTR(variable)
+
+Miscellaneous:
+END
+LET e = e
+MEM
+REM
+STOP
+:	(Multiple statements per line)
+
+Operators:
+	•	, − , * , /
+↑
+< , > , <= , >= , <> , =
+AND , OR , NOT
++
+
+Output:
+OUT port,v
+
+Printing:
+PRINT list
+PRINT TAB(k), …
+PRINT @ …
+PRINT USING $, list
+;	(No Tab)
+,	(Tab)
+
+String:
+ASC(“string”)
+CHR$(e)
+FRE($)
+LEN($)
+LEFT$($,v)
+MID$($,p,v)
+RIGHT$($,v)
+STR$(e)
+STRING$(v,“char”)
+VAL(“string”)
+
+Subroutines:
+GOSUB n
+ON e GOSUB l,m,n, . . .
+RETURN
+
+Variables:
+A–Z
+Ax–Zx where x is A–Z or 0–9
+$
+%
+!
+#
+D (double precision)
+E (scientific notation)
+
+Key:
+:
+n
+. . .
+k,v,w
+“string”
+l–m
+list
+name
+letter range
+(x,y)
+$
+“char”
+e
+l,m,n, . . .
+
+LEVEL II BASIC MONITOR MODE (SYSTEM):
+SYSTEM
+*? name
+*? /address
+*? /
+
+LEVEL II BASIC EDIT MODE:
+
+EDIT 	'Enter EDIT mode for line n
+A  		'Cancel changes already made
+nC  		'Change n characters
+nD   		'Delete n characters to right
+E     		'End edit, save changes
+H     		'Delete remainder of line & I
+I       	'Insert
+nKc      'Delete all characters till nth occurrence of character c
+L      	'List remainder of line
+Q      	'End edit and cancel all chngs
+nSc   	'Search for nth occurrence of c
+X      	'Display remainder, move end
+n←    	'Backspace n spaces
+shift↑    'Escape from edit subcommand
+nspace  'Move n characters to right
+
+
+LEVEL II BASIC ERROR CODES"
+CODES		number 			Meaning
+BS 				9 						Subscript out of range
+CN 				17 					Can’t continue
+DD 				10	     			Redimensioned array
+FC 				5 						Illegal function call
+FD 				22 					Bad file data
+ID 				12 					Illegal direct
+L3 				23 					Disk BASIC
+LS 				15 					String too long
+MO 				21 					Missing operand
+NF 				1 						NEXT without FOR
+NR 				18 					No RESUME
+OD   			4 						Out of data
+OM 				7 						Out of memory
+OS 				14 					Out of string space
+OV 				6 						Overflow
+RG 				3 						Return without GOSUB
+RW 				19 					RESUME without error
+SN 				2 						Syntax error
+ST 				16 					String formula too complex
+TM 				13 					Type mismatch
+UE 				20 					Unprintable error
+UL 				8 						Undefined line
+/0 				11 					Division by zero

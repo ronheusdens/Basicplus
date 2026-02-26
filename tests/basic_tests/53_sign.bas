@@ -1,0 +1,4 @@
+10 PRINT "SGN(-5) = "; SGN(-5)
+20 PRINT "SGN(0) = "; SGN(0)
+30 PRINT "SGN(3.14) = "; SGN(3.14)
+40 PRINT "SGN(-0.001) = "; SGN(-0.001)

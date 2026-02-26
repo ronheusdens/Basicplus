@@ -1,0 +1,12 @@
+10 REM Multi-line IF/THEN/ENDIF test
+20 PRINT "Multi-line IF/THEN/ENDIF..."
+30 X = 5
+40 IF X = 5 THEN
+50   PRINT "Block: PASS 1"
+60   PRINT "Block: PASS 2"
+70 ENDIF
+80 IF X <> 5 THEN
+90   PRINT "Block: FAIL"
+100 ENDIF
+110 PRINT "Done"
+120 END

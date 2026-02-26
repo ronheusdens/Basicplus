@@ -1,0 +1,8 @@
+10 REM Test LN function - natural logarithm
+20 PRINT "LN tests:"
+30 PRINT LN(1)
+40 PRINT LN(2.718281828)
+50 PRINT LN(10)
+60 PRINT LN(100)
+70 PRINT LN(2)
+80 END

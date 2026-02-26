@@ -1,0 +1,15 @@
+10 REM Test multi-level nested IF...ELSE...ENDIF
+20 LET X = 5
+30 LET Y = 10
+40 IF X > 3 THEN
+50 PRINT "X > 3"
+60 IF Y > 8 THEN
+70 PRINT "Y > 8"
+80 ELSE
+90 PRINT "Y <= 8"
+100 ENDIF
+110 ELSE
+120 PRINT "X <= 3"
+130 ENDIF
+140 PRINT "Test complete"
+150 END

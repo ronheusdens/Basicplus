@@ -1,0 +1,36 @@
+#ifndef ERRORS_H
+#define ERRORS_H
+
+#include "common.h"
+
+/* BASIC interpreter error codes (TRS-80 Level II BASIC standard) */
+#define BASIC_ERR_NEXT_WITHOUT_FOR 1
+#define BASIC_ERR_SYNTAX_ERROR 2
+#define BASIC_ERR_RETURN_WITHOUT_GOSUB 3
+#define BASIC_ERR_OUT_OF_DATA 4
+#define BASIC_ERR_ILLEGAL_QUANTITY 5
+#define BASIC_ERR_OVERFLOW 6
+#define BASIC_ERR_OUT_OF_MEMORY 7
+#define BASIC_ERR_UNDEFINED_LINE 8
+#define BASIC_ERR_SUBSCRIPT_OUT_OF_RANGE 9
+#define BASIC_ERR_REDIMENSIONED_ARRAY 10
+#define BASIC_ERR_DIVISION_BY_ZERO 11
+#define BASIC_ERR_ILLEGAL_DIRECT 12
+#define BASIC_ERR_TYPE_MISMATCH 13
+#define BASIC_ERR_OUT_OF_STRING_SPACE 14
+#define BASIC_ERR_STRING_TOO_LONG 15
+#define BASIC_ERR_STRING_FORMULA_TOO_COMPLEX 16
+#define BASIC_ERR_CANT_CONTINUE 17
+#define BASIC_ERR_NO_RESUME 18
+#define BASIC_ERR_RESUME_WITHOUT_ERROR 19
+#define BASIC_ERR_UNPRINTABLE_ERROR 20
+#define BASIC_ERR_MISSING_OPERAND 21
+#define BASIC_ERR_BAD_FILE_DATA 22
+#define BASIC_ERR_DISK_BASIC 23
+
+/* Error message functions */
+
+const char *error_message(int error_code);
+void error_print(int error_code, int line_number);
+
+#endif /* ERRORS_H */

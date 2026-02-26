@@ -1,0 +1,8 @@
+10 REM Test EXP function - exponential e^x
+20 PRINT "EXP tests:"
+30 PRINT EXP(0)
+40 PRINT EXP(1)
+50 PRINT EXP(2)
+60 PRINT EXP(0.5)
+70 PRINT EXP(10)
+80 END

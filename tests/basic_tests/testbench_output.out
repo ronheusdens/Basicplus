@@ -1,0 +1,47 @@
+PASS 01_trig.bas
+PASS 02_for_next.bas
+PASS 03_gosub_return.bas
+PASS 04_if_then.bas
+PASS 05_on_goto.bas
+PASS 06_read_data_restore.bas
+PASS 07_dim_arrays.bas
+PASS 08_string_funcs.bas
+PASS 09_file_io_basic.bas
+PASS 10_file_io_sequential.bas
+PASS 11_file_io_multiple.bas
+PASS 12_file_io_eof.bas
+PASS 13_math_functions.bas
+PASS 14_write_formatted.bas
+PASS 15_random_access.bas
+PASS 16_line_input.bas
+FAIL 17_poke_peek.bas (output mismatch)
+PASS 18_if_then_else.bas
+FAIL 19_print_at.bas (output mismatch)
+FAIL 20_machine_code.bas (output mismatch)
+FAIL 21_arm64_machine_code.bas (output mismatch)
+FAIL 22_array_multidim.bas (output mismatch)
+FAIL 23_array_multidim_comprehensive.bas (output mismatch)
+FAIL 24_power_operator.bas (output mismatch)
+FAIL 25_error_handling.bas (output mismatch)
+PASS 26_multi_statement.bas
+FAIL 27_multi_statement_comprehensive.bas (output mismatch)
+PASS 28_string_concatenation.bas
+PASS 29_while_wend.bas
+FAIL 30_while_nested.bas (output mismatch)
+PASS 31_while_countdown.bas
+FAIL 32_while_and_condition.bas (output mismatch)
+PASS 33_while_or_condition.bas
+PASS 34_while_string_condition.bas
+PASS 35_while_array_condition.bas
+PASS 36_while_with_for.bas
+PASS 37_while_with_gosub.bas
+PASS 38_while_with_goto.bas
+PASS 39_out_of_data.bas
+FAIL 40_print_at.bas (output mismatch)
+PASS 41_video_memory.bas
+PASS 42_video_canvas.bas
+PASS 43_video_scroll.bas
+PASS 44_bouncing_box.bas
+PASS 45_save_statement.bas
+---
+Total: 33/45 tests passed

@@ -1,0 +1,12 @@
+10 REM Test LOG vs LN functions
+20 PRINT "LOG vs LN comparison:"
+30 PRINT LOG(1)
+40 PRINT LN(1)
+50 REM Both should be 0
+60 PRINT LOG(10)
+70 PRINT LN(10)
+80 REM LOG(10) is 1, LN(10) is approx 2.303
+90 PRINT LOG(100)
+100 PRINT LN(100)
+110 REM LOG(100) is 2, LN(100) is approx 4.605
+120 END

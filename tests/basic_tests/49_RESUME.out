@@ -1,0 +1,4 @@
+Before error
+Error handler activated
+ERR=11 ERL=30
+After error

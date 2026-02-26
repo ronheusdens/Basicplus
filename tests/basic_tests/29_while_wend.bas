@@ -1,0 +1,6 @@
+10 X = 0
+20 WHILE X < 3
+30   PRINT X
+40   X = X + 1
+50 WEND
+60 PRINT "Done"

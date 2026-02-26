@@ -1,0 +1,31 @@
+Test 1: DO WHILE x < 3
+x =0
+x =1
+x =2
+After DO WHILE
+
+Test 2: DO LOOP UNTIL n >= 3
+n =0
+n =1
+n =2
+After DO LOOP UNTIL
+
+Test 3: DO LOOP with EXIT
+i =0
+i =1
+After EXIT
+
+Test 4: DO LOOP WHILE j < 3
+j =0
+j =1
+j =2
+After DO LOOP WHILE
+
+Test 5: Nested loops
+x=0 y=0
+x=0 y=1
+x=1 y=0
+x=1 y=1
+After nested loops
+
+All tests completed!

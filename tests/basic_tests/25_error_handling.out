@@ -1,0 +1,6 @@
+Test 1: RESUME NEXT
+Handler1 ERR=5 ERL=40
+After error
+Test 2: RESUME line
+Handler2 ERR=11 ERL=80
+Done

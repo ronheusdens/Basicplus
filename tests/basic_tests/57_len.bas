@@ -1,0 +1,9 @@
+10 REM Test LEN function - string length
+20 PRINT "LEN tests:"
+30 PRINT LEN("HELLO")
+40 PRINT LEN("")
+50 PRINT LEN("A")
+60 LET S$ = "TESTING"
+70 PRINT LEN(S$)
+80 PRINT LEN("123 456 789")
+90 END
