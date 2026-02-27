@@ -1,0 +1,92 @@
+{
+    "name": "Basic++ Light",
+    "type": "light",
+    "colors": {
+        "editor.background": "#ffffff",
+        "editor.foreground": "#333333",
+        "editor.lineNumberColor": "#999999",
+        "editorCursor.foreground": "#000000",
+        "editor.selectionBackground": "#add6ff",
+        "editor.wordHighlightBackground": "#f0f0f0",
+        "editor.wordHighlightBorder": "#cccccc"
+    },
+    "tokenColors": [
+        {
+            "name": "Comment",
+            "scope": "comment",
+            "settings": {
+                "foreground": "#008000"
+            }
+        },
+        {
+            "name": "String",
+            "scope": "string",
+            "settings": {
+                "foreground": "#a31515"
+            }
+        },
+        {
+            "name": "Number",
+            "scope": "constant.numeric",
+            "settings": {
+                "foreground": "#098658"
+            }
+        },
+        {
+            "name": "Control Keywords",
+            "scope": [
+                "keyword.control.basicpp"
+            ],
+            "settings": {
+                "foreground": "#0000ff",
+                "fontStyle": "bold"
+            }
+        },
+        {
+            "name": "Built-in Keywords",
+            "scope": [
+                "keyword.other.basicpp"
+            ],
+            "settings": {
+                "foreground": "#008080"
+            }
+        },
+        {
+            "name": "Type Keywords",
+            "scope": [
+                "support.type.basicpp"
+            ],
+            "settings": {
+                "foreground": "#008080",
+                "fontStyle": "italic"
+            }
+        },
+        {
+            "name": "Operators",
+            "scope": [
+                "keyword.operator.basicpp"
+            ],
+            "settings": {
+                "foreground": "#333333"
+            }
+        },
+        {
+            "name": "Variable",
+            "scope": [
+                "variable.other.basicpp"
+            ],
+            "settings": {
+                "foreground": "#001080"
+            }
+        },
+        {
+            "name": "Function Names",
+            "scope": [
+                "entity.name.function"
+            ],
+            "settings": {
+                "foreground": "#795e26"
+            }
+        }
+    ]
+}

@@ -1,0 +1,112 @@
+{
+    "$schema": "https://raw.githubusercontent.com/martinring/tmlanguage/master/tmlanguage.json",
+    "name": "Basic++",
+    "scopeName": "source.basicpp",
+    "patterns": [
+        {
+            "include": "#comments"
+        },
+        {
+            "include": "#strings"
+        },
+        {
+            "include": "#numbers"
+        },
+        {
+            "include": "#keywords"
+        },
+        {
+            "include": "#types"
+        },
+        {
+            "include": "#operators"
+        },
+        {
+            "include": "#identifiers"
+        }
+    ],
+    "repository": {
+        "comments": {
+            "patterns": [
+                {
+                    "name": "comment.line.basicpp",
+                    "begin": "'",
+                    "end": "$"
+                },
+                {
+                    "name": "comment.line.basicpp",
+                    "begin": "REM",
+                    "end": "$",
+                    "beginCaptures": {
+                        "0": {
+                            "name": "keyword.control.basicpp"
+                        }
+                    }
+                }
+            ]
+        },
+        "strings": {
+            "patterns": [
+                {
+                    "name": "string.quoted.double.basicpp",
+                    "begin": "\"",
+                    "end": "\"",
+                    "patterns": [
+                        {
+                            "name": "constant.character.escape.basicpp",
+                            "match": "\\\\."
+                        }
+                    ]
+                }
+            ]
+        },
+        "numbers": {
+            "patterns": [
+                {
+                    "name": "constant.numeric.float.basicpp",
+                    "match": "\\b[0-9]+\\.[0-9]+([eE][+-]?[0-9]+)?\\b"
+                },
+                {
+                    "name": "constant.numeric.integer.basicpp",
+                    "match": "\\b[0-9]+\\b"
+                }
+            ]
+        },
+        "keywords": {
+            "patterns": [
+                {
+                    "name": "keyword.control.basicpp",
+                    "match": "\\b(PROCEDURE|END|RETURN|IF|THEN|ELSE|ENDIF|FOR|NEXT|WHILE|WEND|DO|LOOP|EXIT|CONTINUE|CLASS|NEW|INHERITS|PUBLIC|PRIVATE)\\b"
+                },
+                {
+                    "name": "keyword.other.basicpp",
+                    "match": "\\b(PRINT|INPUT|LET|READ|DATA|RESTORE|REM|DIM|DEF|FN|ON|GOTO|GOSUB|CALL)\\b"
+                }
+            ]
+        },
+        "types": {
+            "patterns": [
+                {
+                    "name": "support.type.basicpp",
+                    "match": "\\b(INTEGER|LONG|SINGLE|DOUBLE|STRING|BOOLEAN|VARIANT|AS)\\b"
+                }
+            ]
+        },
+        "operators": {
+            "patterns": [
+                {
+                    "name": "keyword.operator.basicpp",
+                    "match": "(\\+|-|\\*|/|\\\\|\\^|MOD|AND|OR|NOT|XOR|EQV|IMP|=|<>|<=|>=|<|>)"
+                }
+            ]
+        },
+        "identifiers": {
+            "patterns": [
+                {
+                    "name": "variable.other.basicpp",
+                    "match": "\\b[a-zA-Z_][a-zA-Z0-9_]*\\$?\\b"
+                }
+            ]
+        }
+    }
+}

@@ -1,5 +1,0 @@
-10 LET X = 1
-20 LET Y = 2
-30 LET Z = X + Y
-40 PRINT "RESULT: "; Z
-50 END

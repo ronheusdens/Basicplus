@@ -1,4 +1,5 @@
-# Makefile for TRS-80 Level 2 BASIC interpreter
+# Makefile for Basic++ Interpreter
+# Line-number-free, procedural BASIC with local scoping
 # Supports macOS (ARM/Intel) and Linux (x64)
 
 # Detect OS and architecture
@@ -9,7 +10,7 @@ UNAME_M := $(shell uname -m)
 CC := gcc
 
 # Common flags
-WFLAGS ?= -Wall -Wextra
+WFLAGS ?= -Wall -Wextra -Werror=implicit-function-declaration
 CFLAGS_COMMON := -std=c99 $(WFLAGS) -O2 -g
 LDFLAGS_COMMON := -lm
 
@@ -35,157 +36,83 @@ ifeq ($(UNAME_S),Linux)
     endif
 endif
 
-# Per-target flags (overrideable)
-CFLAGS_ast_build ?=
-
-# SDL2 support (for windowed terminal interface)
-USE_SDL ?= 1
-ifeq ($(USE_SDL),1)
-    CFLAGS_ast_build += -DUSE_SDL
-    # SDL2 detection
-    ifeq ($(UNAME_S),Darwin)
-        # macOS: try Homebrew SDL2 first
-        ifeq ($(shell test -f /opt/homebrew/include/SDL2/SDL.h && echo 1),1)
-            CFLAGS_ast_build += -I/opt/homebrew/include
-            LDFLAGS_SDL = -L/opt/homebrew/lib -lSDL2 -lSDL2_ttf
-        else ifeq ($(shell test -f /usr/local/include/SDL2/SDL.h && echo 1),1)
-            CFLAGS_ast_build += -I/usr/local/include
-            LDFLAGS_SDL = -L/usr/local/lib -lSDL2 -lSDL2_ttf
-        else
-            LDFLAGS_SDL = -lSDL2 -lSDL2_ttf
-        endif
-    else
-        # Linux: standard SDL2
-        LDFLAGS_SDL = -lSDL2 -lSDL2_ttf
-    endif
-endif
-
-# Curses support (optional, for portable terminal interface)
-# NOTE: Legacy interpreter deprecated in favor of AST-based implementation
-USE_CURSES ?= 0
-
-# Sources - AST-based architecture only
-# Legacy monolith interpreter (src/basic-trs80/basic.c) has been retired
-# All development continues with the modular AST implementation
-ifeq ($(USE_SDL),1)
-SRC_AST_BUILD := \
-	src/ast-modules/common.c \
-	src/ast-modules/ast.c \
-	src/ast-modules/ast_helpers.c \
-	src/ast-modules/lexer.c \
-	src/ast-modules/parser.c \
-	src/ast-modules/symtable.c \
-	src/ast-modules/runtime.c \
-	src/ast-modules/eval.c \
-	src/ast-modules/executor.c \
-	src/ast-modules/builtins.c \
-	src/ast-modules/debug.c \
-	src/ast-modules/errors.c \
-	src/ast-modules/compat.c \
-	src/ast-modules/trace.c \
-	src/ast-modules/videomem.c \
-	src/ast-modules/video_backend.c \
-	src/ast-modules/termio_sdl.c \
-	src/ast-modules/main.c
-else
-SRC_AST_BUILD := \
-	src/ast-modules/common.c \
-	src/ast-modules/ast.c \
-	src/ast-modules/ast_helpers.c \
-	src/ast-modules/lexer.c \
-	src/ast-modules/parser.c \
-	src/ast-modules/symtable.c \
-	src/ast-modules/runtime.c \
-	src/ast-modules/eval.c \
-	src/ast-modules/executor.c \
-	src/ast-modules/builtins.c \
-	src/ast-modules/debug.c \
-	src/ast-modules/errors.c \
-	src/ast-modules/compat.c \
-	src/ast-modules/trace.c \
-	src/ast-modules/videomem.c \
-	src/ast-modules/video_backend.c \
-	src/ast-modules/termio.c \
-	src/ast-modules/main.c
-endif
-
+# Directories
+SRC_DIR := src
 OBJ_DIR := obj
-AST_OBJS := $(SRC_AST_BUILD:src/ast-modules/%.c=$(OBJ_DIR)/%.o)
+BUILD_DIR := build
+BIN_DIR := $(BUILD_DIR)/bin
 
-# Output
-OUTDIR := build/bin
+# Output binary
+BINARY := $(BIN_DIR)/basicpp
 
-.PHONY: all help ast-build clean test app install-app
+# Source files (Phase 1 essentials)
+SRCS := \
+	$(SRC_DIR)/main.c \
+	$(SRC_DIR)/lexer.c \
+	$(SRC_DIR)/parser.c \
+	$(SRC_DIR)/ast.c \
+	$(SRC_DIR)/ast_helpers.c \
+	$(SRC_DIR)/executor.c \
+	$(SRC_DIR)/runtime.c \
+	$(SRC_DIR)/eval.c \
+	$(SRC_DIR)/builtins.c \
+	$(SRC_DIR)/symtable.c \
+	$(SRC_DIR)/errors.c \
+	$(SRC_DIR)/termio.c \
+	$(SRC_DIR)/common.c \
+	$(SRC_DIR)/compat.c
 
-all: ast-build
+OBJS := $(SRCS:$(SRC_DIR)/%.c=$(OBJ_DIR)/%.o)
+
+# Compilation flags for this project
+CFLAGS := $(CFLAGS_COMMON)
+LDFLAGS := $(LDFLAGS_COMMON)
+
+# Targets
+.PHONY: all build test clean help
+
+all: build
 
 help:
-	@echo "TRS-80 Level II BASIC Interpreter - AST-based implementation"
+	@echo "Basic++ Interpreter Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  make ast-build            Build AST-based interpreter (modular architecture)"
-	@echo "  make app                  Build macOS app bundle (macOS only)"
-	@echo "  make install-app          Install app to /Applications (macOS only)"
-	@echo "  make test                 Run test suite"
-	@echo "  make test TEST=49         Run single test (e.g. 49 for 49_RESUME.bas)"
-	@echo "  make clean                Remove build outputs"
+	@echo "  make build       - Build interpreter (default)"
+	@echo "  make test        - Run entire test suite"
+	@echo "  make clean       - Remove build artifacts"
+	@echo "  make help        - Show this message"
 	@echo ""
-	@echo "Detected: $(UNAME_S) $(UNAME_M)"
-	@echo "Compiler: $(CC)"
+	@echo "Variables:"
+	@echo "  WFLAGS           - C compiler warning flags (default: -Wall -Wextra -Werror=implicit)"
+	@echo "  TEST             - Run specific test(s) by number (e.g., make test TEST=01)"
+	@echo "                     TEST=25 runs all tests matching 25*.bas"
 	@echo ""
-	@echo "Output:"
-	@echo "  $(OUTDIR)/basic-trs80-ast (AST-based interpreter)"
-	@echo ""
-	@echo "Per-target flags:"
-	@echo "  make ast-build CFLAGS_ast_build='-DDEBUG=1'"
-	@echo ""
-	@echo "macOS App Bundle:"
-	@echo "  make app                  Create .app bundle in project directory"
-	@echo "  make install-app          Copy app to /Applications"
+	@echo "Examples:"
+	@echo "  make test              # Run all 66 tests"
+	@echo "  make test TEST=01      # Run test 01_trig.bas"
+	@echo "  make test TEST=0       # Run all tests starting with 0 (01-09)"
+	@echo "  make test TEST=25      # Run test 25_error_handling.bas"
 
-# AST-based interpreter build
-$(OBJ_DIR)/%.o: src/ast-modules/%.c
+build: $(BINARY)
+
+$(BIN_DIR):
+	@mkdir -p $(BIN_DIR)
+
+$(OBJ_DIR):
 	@mkdir -p $(OBJ_DIR)
-	$(CC) $(CFLAGS_COMMON) $(CFLAGS_ast_build) -I src/ast-modules -c $< -o $@
 
-ast-build: $(AST_OBJS)
-	@mkdir -p $(OUTDIR)
-	@echo "Linking AST-based interpreter..."
-	$(CC) $(CFLAGS_COMMON) $(AST_OBJS) -o $(OUTDIR)/basic-trs80-ast $(LDFLAGS_COMMON) $(LDFLAGS_SDL)
-	@echo "Built: $(OUTDIR)/basic-trs80-ast"
+$(OBJ_DIR)/%.o: $(SRC_DIR)/%.c | $(OBJ_DIR)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# Run all tests, or a single test: make test TEST=49
-test: ast-build
-	@cd tests/basic_tests && ./run_tests.sh ../../$(OUTDIR)/basic-trs80-ast $(TEST)
+$(BINARY): $(OBJS) | $(BIN_DIR)
+	$(CC) $(OBJS) $(LDFLAGS) -o $@
+	@echo "✓ Built: $@"
 
-app: ast-build
-	@if [ "$(UNAME_S)" != "Darwin" ]; then \
-		echo "Error: App bundle can only be built on macOS"; \
-		exit 1; \
-	fi
-	@echo "Creating app bundle with windowed interpreter..."
-	@rm -rf "TRS-80 Level II BASIC.app"
-	@mkdir -p "TRS-80 Level II BASIC.app/Contents/MacOS"
-	@mkdir -p "TRS-80 Level II BASIC.app/Contents/Resources"
-	@cp $(OUTDIR)/basic-trs80-ast "TRS-80 Level II BASIC.app/Contents/MacOS/basic-trs80"
-	@chmod +x "TRS-80 Level II BASIC.app/Contents/MacOS/basic-trs80"
-	@cp macos_app/AppIcon.icns "TRS-80 Level II BASIC.app/Contents/Resources/AppIcon.icns"
-	@printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleDevelopmentRegion</key>\n  <string>en</string>\n  <key>CFBundleExecutable</key>\n  <string>basic-trs80</string>\n  <key>CFBundleIconFile</key>\n  <string>AppIcon</string>\n  <key>CFBundleIdentifier</key>\n  <string>com.ronheusdens.trs80basic</string>\n  <key>CFBundleInfoDictionaryVersion</key>\n  <string>6.0</string>\n  <key>CFBundleName</key>\n  <string>TRS-80 Level II BASIC</string>\n  <key>CFBundlePackageType</key>\n  <string>APPL</string>\n  <key>CFBundleShortVersionString</key>\n  <string>1.0</string>\n  <key>CFBundleVersion</key>\n  <string>1</string>\n  <key>NSHighResolutionCapable</key>\n  <true/>\n  <key>NSHumanReadableCopyright</key>\n  <string>Copyright © 2026. All rights reserved.</string>\n</dict>\n</plist>' > "TRS-80 Level II BASIC.app/Contents/Info.plist"
-	@echo "App bundle created: TRS-80 Level II BASIC.app"
-
-install-app: app
-	@if [ "$(UNAME_S)" != "Darwin" ]; then \
-		echo "Error: App can only be installed on macOS"; \
-		exit 1; \
-	fi
-	@echo "Installing windowed BASIC app to /Applications..."
-	@rm -rf "/Applications/TRS-80 Level II BASIC.app"
-	@cp -R "TRS-80 Level II BASIC.app" "/Applications/"
-	@echo "✓ App installed to /Applications/TRS-80 Level II BASIC.app"
-	@echo "You can now launch it from Applications or Spotlight!"
+test: build
+	@bash tests/basic_tests/run_tests.sh $(BINARY) $(TEST)
 
 clean:
-	rm -rf build obj
-	@if [ "$(UNAME_S)" = "Darwin" ]; then \
-		rm -rf "TRS-80 Level II BASIC.app"; \
-	fi
+	@rm -rf $(OBJ_DIR) $(BUILD_DIR)
+	@echo "✓ Cleaned build artifacts"
+
+.SILENT: help

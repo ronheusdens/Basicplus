@@ -1,0 +1,63 @@
+{
+    "comments": {
+        "lineComment": "'",
+        "blockComment": [
+            "/*",
+            "*/"
+        ]
+    },
+    "brackets": [
+        [
+            "{",
+            "}"
+        ],
+        [
+            "[",
+            "]"
+        ],
+        [
+            "(",
+            ")"
+        ]
+    ],
+    "autoClosingPairs": [
+        [
+            "{",
+            "}"
+        ],
+        [
+            "[",
+            "]"
+        ],
+        [
+            "(",
+            ")"
+        ],
+        [
+            "\"",
+            "\""
+        ]
+    ],
+    "surroundingPairs": [
+        [
+            "{",
+            "}"
+        ],
+        [
+            "[",
+            "]"
+        ],
+        [
+            "(",
+            ")"
+        ],
+        [
+            "\"",
+            "\""
+        ]
+    ],
+    "indentationRules": {
+        "increaseIndentPattern": "^\\s*(PROCEDURE|CLASS|IF|FOR|WHILE|DO)\\b.*$",
+        "decreaseIndentPattern": "^\\s*(END|ENDIF|WEND|NEXT)\\b.*$"
+    }
+}
