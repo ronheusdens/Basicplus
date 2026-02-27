@@ -85,7 +85,86 @@ static void preload_data(RuntimeState *state, Program *prog)
     }
 }
 
+/** Scope management for procedures **/
+
+/* Create a new procedure scope */
+static ProcedureScope *proc_scope_create(void)
+{
+    ProcedureScope *scope = xmalloc(sizeof(ProcedureScope));
+    scope->var_names = NULL;
+    scope->var_values = NULL;
+    scope->num_vars = 0;
+    scope->capacity = 0;
+    return scope;
+}
+
+/* Free a procedure scope */
+static void proc_scope_free(ProcedureScope *scope)
+{
+    if (scope)
+    {
+        for (int i = 0; i < scope->num_vars; i++)
+        {
+            free(scope->var_names[i]);
+        }
+        free(scope->var_names);
+        free(scope->var_values);
+        free(scope);
+    }
+}
+
+/* Push a scope onto the scope stack */
+static void proc_scope_push(ExecutionContext *ctx, ProcedureScope *scope)
+{
+    if (ctx->scope_sp >= ctx->scope_cap)
+    {
+        ctx->scope_cap = ctx->scope_cap == 0 ? 4 : ctx->scope_cap * 2;
+        ctx->scope_stack = xrealloc(ctx->scope_stack, ctx->scope_cap * sizeof(ProcedureScope));
+    }
+    ctx->scope_stack[ctx->scope_sp++] = *scope;
+    free(scope); /* Container freed, values are in stack */
+}
+
+/* Pop a scope from the scope stack */
+static ProcedureScope *proc_scope_pop(ExecutionContext *ctx)
+{
+    if (ctx->scope_sp <= 0)
+        return NULL;
+
+    ProcedureScope *scope = xmalloc(sizeof(ProcedureScope));
+    *scope = ctx->scope_stack[--ctx->scope_sp];
+    return scope;
+}
+
+/* Get current scope (top of stack) */
+static ProcedureScope *proc_scope_current(ExecutionContext *ctx)
+{
+    if (ctx->scope_sp <= 0)
+        return NULL;
+    return &ctx->scope_stack[ctx->scope_sp - 1];
+}
+
+/* Save a variable to the current scope */
+static void proc_scope_save_var(ExecutionContext *ctx, const char *name, double value)
+{
+    ProcedureScope *scope = proc_scope_current(ctx);
+    if (!scope)
+        return;
+
+    if (scope->num_vars >= scope->capacity)
+    {
+        scope->capacity = scope->capacity == 0 ? 8 : scope->capacity * 2;
+        scope->var_names = xrealloc(scope->var_names, scope->capacity * sizeof(char *));
+        scope->var_values = xrealloc(scope->var_values, scope->capacity * sizeof(double));
+    }
+
+    scope->var_names[scope->num_vars] = xstrdup(name);
+    scope->var_values[scope->num_vars] = value;
+    scope->num_vars++;
+}
+
 /* Forward declarations */
+
 static int execute_stmt_internal(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_print_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_print_at_stmt(ExecutionContext *ctx, ASTStmt *stmt);
@@ -99,7 +178,8 @@ static int execute_for_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_next_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_goto_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_gosub_stmt(ExecutionContext *ctx, ASTStmt *stmt);
-static int execute_return_stmt(ExecutionContext *ctx);
+static int execute_return_stmt(ExecutionContext *ctx, ASTStmt *stmt);
+static int execute_procedure_call_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_dim_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_read_stmt(ExecutionContext *ctx, ASTStmt *stmt);
 static int execute_data_stmt(ExecutionContext *ctx, ASTStmt *stmt);
@@ -200,7 +280,7 @@ static int execute_stmt_internal(ExecutionContext *ctx, ASTStmt *stmt)
         result = execute_gosub_stmt(ctx, stmt);
         break;
     case STMT_RETURN:
-        result = execute_return_stmt(ctx);
+        result = execute_return_stmt(ctx, stmt);
         break;
     case STMT_DIM:
         result = execute_dim_stmt(ctx, stmt);
@@ -355,8 +435,7 @@ static int execute_stmt_internal(ExecutionContext *ctx, ASTStmt *stmt)
         break;
     case STMT_PROCEDURE_CALL:
         /* PROCEDURE call: execute the procedure with parameters */
-        /* PHASE 1.3: Implement scope push/pop and parameter binding */
-        result = 0; /* For now, just ignore the call */
+        result = execute_procedure_call_stmt(ctx, stmt);
         break;
     default:
         /* Unknown or unimplemented statement */
@@ -1773,27 +1852,153 @@ static int execute_gosub_stmt(ExecutionContext *ctx, ASTStmt *stmt)
     return 0;
 }
 /* Execute RETURN statement */
-static int execute_return_stmt(ExecutionContext *ctx)
+static int execute_return_stmt(ExecutionContext *ctx, ASTStmt *stmt)
 {
-    int return_line = runtime_pop_call(ctx->runtime);
-
-    if (return_line < 0)
+    /* RETURN only valid inside procedures (no GOSUB in this interpreter) */
+    if (!ctx->in_procedure)
     {
-        /* Return without GOSUB */
-        return -BASIC_ERR_RETURN_WITHOUT_GOSUB;
+        runtime_set_error(ctx->runtime, 3, 0); /* RETURN without procedure */
+        return -3;
     }
 
-    int return_index = find_program_line(ctx->program, return_line);
-
-    if (return_index < 0)
+    /* Evaluate return value if present */
+    if (stmt && stmt->num_exprs > 0)
     {
-        /* Invalid return line */
-        return -BASIC_ERR_UNDEFINED_LINE;
+        double ret_val = ast_eval_expr(stmt->exprs[0]);
+        ctx->proc_return_value = ret_val;
+    }
+    else
+    {
+        ctx->proc_return_value = 0.0;
     }
 
-    ctx->next_line_index = return_index;
-
+    /* Set flag to exit procedure */
+    ctx->proc_return_flag = 1;
     return 0;
+}
+
+/* Helper: Find procedure definition by name */
+static ASTStmt *find_procedure_def(Program *prog, const char *proc_name)
+{
+    if (!prog || !proc_name)
+        return NULL;
+
+    for (int i = 0; i < prog->num_lines; i++)
+    {
+        ASTStmt *stmt = prog->lines[i]->stmt;
+        if (stmt && stmt->type == STMT_PROCEDURE_DEF && stmt->var_name)
+        {
+            if (strcasecmp(stmt->var_name, proc_name) == 0)
+            {
+                return stmt;
+            }
+        }
+    }
+    return NULL;
+}
+
+/* Execute PROCEDURE CALL statement */
+static int execute_procedure_call_stmt(ExecutionContext *ctx, ASTStmt *stmt)
+{
+    if (!stmt || !stmt->var_name)
+        return 0;
+
+    /* Find procedure definition */
+    ASTStmt *proc_def = find_procedure_def(ctx->program, stmt->var_name);
+    if (!proc_def)
+    {
+        /* Procedure not found - treat as error */
+        runtime_set_error(ctx->runtime, 251, 0); /* Illegal function call */
+        return -251;
+    }
+
+    /* Create and push a new scope for this procedure call */
+    ProcedureScope *new_scope = proc_scope_create();
+    proc_scope_push(ctx, new_scope);
+
+    /* Save original values of parameter names (to restore after) */
+    if (proc_def->parameters)
+    {
+        for (int i = 0; i < proc_def->parameters->num_params; i++)
+        {
+            ASTParameter *param = proc_def->parameters->params[i];
+            if (param && param->name)
+            {
+                /* Save the original value if variable exists */
+                double original_value = 0.0;
+                if (runtime_has_variable(ctx->runtime, param->name))
+                {
+                    original_value = runtime_get_variable(ctx->runtime, param->name);
+                }
+                proc_scope_save_var(ctx, param->name, original_value);
+            }
+        }
+    }
+
+    /* Bind arguments to parameters as local variables */
+    if (proc_def->parameters)
+    {
+        for (int i = 0; i < proc_def->parameters->num_params && i < stmt->num_call_args; i++)
+        {
+            ASTParameter *param = proc_def->parameters->params[i];
+            ASTExpr *arg = stmt->call_args[i];
+
+            if (arg && param && param->name)
+            {
+                /* Evaluate argument in caller's scope */
+                double arg_value = ast_eval_expr(arg);
+
+                /* Store argument as local variable in procedure scope */
+                runtime_set_variable(ctx->runtime, param->name, arg_value);
+            }
+        }
+    }
+
+    /* Mark that we're in a procedure */
+    int saved_in_procedure = ctx->in_procedure;
+    ctx->in_procedure = 1;
+    int saved_proc_return_flag = ctx->proc_return_flag;
+    ctx->proc_return_flag = 0;
+
+    /* Execute procedure body */
+    int result = 0;
+    if (proc_def->body)
+    {
+        result = execute_stmt_internal(ctx, proc_def->body);
+    }
+
+    /* Save return value before scope restoration */
+    double return_value = ctx->proc_return_value;
+
+    /* Restore procedure context */
+    ctx->proc_return_flag = saved_proc_return_flag;
+    ctx->in_procedure = saved_in_procedure;
+
+    /* Restore global variables shadowed by parameters */
+    ProcedureScope *scope = proc_scope_pop(ctx);
+    if (scope)
+    {
+        for (int i = 0; i < scope->num_vars; i++)
+        {
+            /* Only restore if the variable existed before the call */
+            if (scope->var_values[i] != 0.0 || runtime_has_variable(ctx->runtime, scope->var_names[i]))
+            {
+                runtime_set_variable(ctx->runtime, scope->var_names[i], scope->var_values[i]);
+            }
+            else
+            {
+                /* Variable was created in procedure, remove it from global scope */
+                runtime_delete_variable(ctx->runtime, scope->var_names[i]);
+            }
+        }
+        proc_scope_free(scope);
+    }
+
+    /* Store return value in 'result' variable for caller to access */
+    runtime_set_variable(ctx->runtime, "result", return_value);
+    ctx->proc_return_value = return_value;
+
+    return result;
 }
 
 /* Execute DIM statement (array dimension) */
@@ -2778,6 +2983,9 @@ int execute_program(RuntimeState *state, Program *prog)
     ctx.while_stack = NULL;
     ctx.while_sp = 0;
     ctx.while_cap = 0;
+    ctx.proc_return_flag = 0;
+    ctx.proc_return_value = 0.0;
+    ctx.in_procedure = 0;
 
     preload_data(state, prog);
 
@@ -2919,6 +3127,9 @@ int execute_program_from_line(RuntimeState *state, Program *prog, int start_line
     ctx.while_stack = NULL;
     ctx.while_sp = 0;
     ctx.while_cap = 0;
+    ctx.proc_return_flag = 0;
+    ctx.proc_return_value = 0.0;
+    ctx.in_procedure = 0;
 
     preload_data(state, prog);
 
@@ -3036,9 +3247,19 @@ int execute_statement(RuntimeState *state, ASTStmt *stmt, Program *prog)
     ctx.current_line_index = 0;
     ctx.next_line_index = 1;
     ctx.next_stmt_override = NULL;
+    ctx.skip_chained = 0;
     ctx.return_line_index = -1;
     ctx.error_code = 0;
     ctx.error_msg = NULL;
+    ctx.for_stack = NULL;
+    ctx.for_sp = 0;
+    ctx.for_cap = 0;
+    ctx.while_stack = NULL;
+    ctx.while_sp = 0;
+    ctx.while_cap = 0;
+    ctx.proc_return_flag = 0;
+    ctx.proc_return_value = 0.0;
+    ctx.in_procedure = 0;
 
     return execute_stmt_internal(&ctx, stmt);
 }

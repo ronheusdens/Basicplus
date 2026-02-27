@@ -135,6 +135,9 @@ struct RuntimeState
 
     /* Scope stack for procedure local variables */
     ScopeStack *scope_stack;
+
+    /* Procedure registry for storing procedure definitions */
+    ProcedureRegistry *procedure_registry;
 };
 
 /* Helper to find variable by name */
@@ -340,6 +343,9 @@ RuntimeState *runtime_create(void)
     /* Scope stack for procedure local variables */
     state->scope_stack = scope_stack_create();
 
+    /* Procedure registry for storing procedure definitions */
+    state->procedure_registry = procedure_registry_create();
+
     return state;
 }
 
@@ -463,6 +469,12 @@ void runtime_free(RuntimeState *state)
         scope_stack_free(state->scope_stack);
     }
 
+    /* Free procedure registry */
+    if (state->procedure_registry != NULL)
+    {
+        procedure_registry_free(state->procedure_registry);
+    }
+
     free(state);
 }
 
@@ -563,6 +575,37 @@ double runtime_get_variable(RuntimeState *state, const char *name)
     }
 
     return var->value.num_value;
+}
+
+int runtime_has_variable(RuntimeState *state, const char *name)
+{
+    if (state == NULL || name == NULL)
+    {
+        return 0;
+    }
+
+    Variable *var = find_variable(state, name);
+    return var != NULL ? 1 : 0;
+}
+
+void runtime_delete_variable(RuntimeState *state, const char *name)
+{
+    /* Note: Variable deletion from symtable not fully implemented */
+    /* For now, we'll just set it to 0/empty string */
+    if (state == NULL || name == NULL)
+    {
+        return;
+    }
+
+    VarType type = get_var_type_from_name(state, name);
+    if (type == VAR_STRING)
+    {
+        runtime_set_string_variable(state, name, "");
+    }
+    else
+    {
+        runtime_set_variable(state, name, 0.0);
+    }
 }
 
 char *runtime_get_string_variable(RuntimeState *state, const char *name)
@@ -1783,4 +1826,126 @@ Scope *scope_lookup_chain(Scope *scope, const char *var_name)
      * Full implementation would check local_vars SymbolTable
      * This is a placeholder for future integration */
     return scope;
+}
+
+/* Procedure Registry Implementation */
+
+ProcedureRegistry *procedure_registry_create(void)
+{
+    ProcedureRegistry *reg = xcalloc(1, sizeof(ProcedureRegistry));
+    reg->capacity = 32;
+    reg->procedures = xmalloc(reg->capacity * sizeof(ProcedureDef *));
+    reg->count = 0;
+    return reg;
+}
+
+void procedure_registry_free(ProcedureRegistry *reg)
+{
+    if (reg == NULL)
+        return;
+
+    /* Free each procedure definition */
+    for (int i = 0; i < reg->count; i++)
+    {
+        if (reg->procedures[i] != NULL)
+        {
+            if (reg->procedures[i]->name != NULL)
+                free(reg->procedures[i]->name);
+            /* parameters and body are managed by AST, don't free here */
+            free(reg->procedures[i]);
+        }
+    }
+
+    free(reg->procedures);
+    free(reg);
+}
+
+void procedure_registry_add(ProcedureRegistry *reg, const char *name, void *parameters, void *body)
+{
+    if (reg == NULL || name == NULL)
+        return;
+
+    /* Resize if needed */
+    if (reg->count >= reg->capacity)
+    {
+        reg->capacity *= 2;
+        reg->procedures = xrealloc(reg->procedures, reg->capacity * sizeof(ProcedureDef *));
+    }
+
+    /* Create new procedure definition */
+    ProcedureDef *proc = xmalloc(sizeof(ProcedureDef));
+    proc->name = xstrdup(name);
+    proc->parameters = parameters;
+    proc->body = body;
+
+    reg->procedures[reg->count] = proc;
+    reg->count++;
+}
+
+ProcedureDef *procedure_registry_lookup(ProcedureRegistry *reg, const char *name)
+{
+    if (reg == NULL || name == NULL)
+        return NULL;
+
+    for (int i = 0; i < reg->count; i++)
+    {
+        if (strcmp(reg->procedures[i]->name, name) == 0)
+            return reg->procedures[i];
+    }
+
+    return NULL;
+}
+
+void procedure_registry_clear(ProcedureRegistry *reg)
+{
+    if (reg == NULL)
+        return;
+
+    for (int i = 0; i < reg->count; i++)
+    {
+        if (reg->procedures[i] != NULL)
+        {
+            if (reg->procedures[i]->name != NULL)
+                free(reg->procedures[i]->name);
+            free(reg->procedures[i]);
+        }
+    }
+
+    reg->count = 0;
+}
+
+/* RuntimeState procedure access functions */
+
+void runtime_register_procedure(RuntimeState *state, const char *name, void *parameters, void *body)
+{
+    if (state == NULL || state->procedure_registry == NULL)
+        return;
+
+    procedure_registry_add(state->procedure_registry, name, parameters, body);
+}
+
+ProcedureDef *runtime_lookup_procedure(RuntimeState *state, const char *name)
+{
+    if (state == NULL || state->procedure_registry == NULL)
+        return NULL;
+
+    return procedure_registry_lookup(state->procedure_registry, name);
+}
+
+ProcedureRegistry *runtime_get_procedure_registry(RuntimeState *state)
+{
+    if (state == NULL)
+        return NULL;
+
+    return state->procedure_registry;
+}
+
+/* Scope stack access through RuntimeState */
+
+ScopeStack *runtime_get_scope_stack(RuntimeState *state)
+{
+    if (state == NULL)
+        return NULL;
+
+    return state->scope_stack;
 }

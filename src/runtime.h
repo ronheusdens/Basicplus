@@ -36,6 +36,26 @@ typedef struct
 } ScopeStack;
 
 /*
+ * Procedure definition - stores parsed procedure for later calls
+ */
+typedef struct ProcedureDef
+{
+    char *name;       /* Procedure name */
+    void *parameters; /* ASTParameterList ptr (void to avoid circular dep) */
+    void *body;       /* ASTStmt ptr - procedure body */
+} ProcedureDef;
+
+/*
+ * Procedure registry - stores all defined procedures
+ */
+typedef struct
+{
+    ProcedureDef **procedures; /* Array of procedure definitions */
+    int count;                 /* Number of procedures */
+    int capacity;              /* Allocated capacity */
+} ProcedureRegistry;
+
+/*
  * Runtime state (opaque structure, defined in runtime.c)
  */
 typedef struct RuntimeState RuntimeState;
@@ -59,6 +79,21 @@ Scope *scope_pop(ScopeStack *stack);
 Scope *scope_current(ScopeStack *stack);
 Scope *scope_lookup_chain(Scope *scope, const char *var_name);
 
+/* Procedure registry management (for procedure definitions and calls) */
+ProcedureRegistry *procedure_registry_create(void);
+void procedure_registry_free(ProcedureRegistry *reg);
+void procedure_registry_add(ProcedureRegistry *reg, const char *name, void *parameters, void *body);
+ProcedureDef *procedure_registry_lookup(ProcedureRegistry *reg, const char *name);
+void procedure_registry_clear(ProcedureRegistry *reg);
+
+/* Procedure access through RuntimeState */
+void runtime_register_procedure(RuntimeState *state, const char *name, void *parameters, void *body);
+ProcedureDef *runtime_lookup_procedure(RuntimeState *state, const char *name);
+ProcedureRegistry *runtime_get_procedure_registry(RuntimeState *state);
+
+/* Scope stack access through RuntimeState */
+ScopeStack *runtime_get_scope_stack(RuntimeState *state);
+
 void runtime_set_memory_size(RuntimeState *state, int memory_size);
 int runtime_get_memory_size(RuntimeState *state);
 
@@ -69,6 +104,8 @@ int runtime_get_output_col(RuntimeState *state);
 
 void runtime_set_variable(RuntimeState *state, const char *name, double value);
 double runtime_get_variable(RuntimeState *state, const char *name);
+int runtime_has_variable(RuntimeState *state, const char *name);
+void runtime_delete_variable(RuntimeState *state, const char *name);
 void runtime_set_string_variable(RuntimeState *state, const char *name, const char *value);
 char *runtime_get_string_variable(RuntimeState *state, const char *name);
 

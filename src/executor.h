@@ -25,6 +25,15 @@ typedef struct WhileFrame
     int wend_line_index;
 } WhileFrame;
 
+/* Local variable scope for procedures */
+typedef struct
+{
+    char **var_names;
+    double *var_values;
+    int num_vars;
+    int capacity;
+} ProcedureScope;
+
 /* Execution context for tracking state during execution */
 typedef struct
 {
@@ -43,6 +52,12 @@ typedef struct
     WhileFrame *while_stack;
     int while_sp;
     int while_cap;
+    int proc_return_flag;        /* Set when RETURN executed in procedure */
+    double proc_return_value;    /* Return value from procedure */
+    int in_procedure;            /* Track if currently in procedure execution */
+    ProcedureScope *scope_stack; /* Stack of procedure scopes for local variables */
+    int scope_sp;                /* Scope stack pointer */
+    int scope_cap;               /* Scope stack capacity */
 } ExecutionContext;
 
 /* Executor functions */

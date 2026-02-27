@@ -1413,27 +1413,85 @@ static ASTStmt *parse_let_stmt(Parser *parser)
     char *var_name = xstrdup(tok->value);
     advance(parser);
 
-    /* Check for array subscript */
+    /* Check for array subscript or procedure call */
     ASTExpr *lhs = ast_expr_create(EXPR_VAR);
     lhs->var_name = var_name;
 
     if (match(parser, TOK_LPAREN))
     {
-        /* Array assignment: A(I) = value */
-        lhs->type = EXPR_ARRAY;
-        while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
+        /* Could be array assignment: A(I) = value  OR  procedure call: CalcFunc(X) */
+        int arg_count = 0;
+
+        /* Parse arguments */
+        if (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
         {
-            ASTExpr *subscript = parse_expression(parser);
-            if (subscript)
+            ASTExpr *arg = parse_expression(parser);
+            if (arg)
             {
-                ast_expr_add_child(lhs, subscript);
+                ast_expr_add_child(lhs, arg);
+                arg_count++;
             }
-            if (!match(parser, TOK_COMMA))
+
+            while (match(parser, TOK_COMMA))
             {
-                break;
+                arg = parse_expression(parser);
+                if (arg)
+                {
+                    ast_expr_add_child(lhs, arg);
+                    arg_count++;
+                }
             }
         }
-        expect(parser, TOK_RPAREN, "Expected ')' after array subscript");
+
+        if (!expect(parser, TOK_RPAREN, "Expected ')' after subscript/arguments"))
+        {
+            ast_expr_free(lhs);
+            return NULL;
+        }
+
+        /* Check what comes after: '=' means array assignment, otherwise procedure call */
+        if (current_token(parser) && current_token(parser)->type == TOK_EQ)
+        {
+            /* Array assignment: A(I) = value */
+            lhs->type = EXPR_ARRAY;
+            advance(parser); /* consume '=' */
+
+            ASTExpr *rhs = parse_expression(parser);
+            if (!rhs)
+            {
+                ast_expr_free(lhs);
+                return NULL;
+            }
+
+            ASTStmt *stmt = ast_stmt_create(STMT_LET);
+            ast_stmt_add_expr(stmt, lhs);
+            ast_stmt_add_expr(stmt, rhs);
+            return stmt;
+        }
+        else
+        {
+            /* Procedure call: CalcFunc(X, Y) */
+            ASTStmt *stmt = ast_stmt_create(STMT_PROCEDURE_CALL);
+            stmt->var_name = xstrdup(var_name);
+
+            /* Copy arguments from lhs children into call_args */
+            for (int i = 0; i < lhs->num_children; i++)
+            {
+                if (stmt->num_call_args >= stmt->capacity_call_args)
+                {
+                    stmt->capacity_call_args = stmt->capacity_call_args == 0 ? 4 : stmt->capacity_call_args * 2;
+                    stmt->call_args = xrealloc(stmt->call_args, stmt->capacity_call_args * sizeof(ASTExpr *));
+                }
+                stmt->call_args[stmt->num_call_args++] = lhs->children[i];
+            }
+
+            /* Free the lhs expression structure but not the children (they're now owned by stmt) */
+            lhs->children = NULL;
+            lhs->num_children = 0;
+            ast_expr_free(lhs);
+
+            return stmt;
+        }
     }
 
     if (!expect(parser, TOK_EQ, "Expected '=' in assignment"))
@@ -1783,7 +1841,21 @@ static ASTStmt *parse_gosub_stmt(Parser *parser)
 static ASTStmt *parse_return_stmt(Parser *parser)
 {
     advance(parser); /* consume RETURN */
-    return ast_stmt_create(STMT_RETURN);
+    ASTStmt *stmt = ast_stmt_create(STMT_RETURN);
+
+    /* Check if there's a return value expression */
+    Token *tok = current_token(parser);
+    if (tok && tok->type != TOK_COLON && tok->type != TOK_NEWLINE && tok->type != TOK_EOF)
+    {
+        /* Parse return value expression */
+        ASTExpr *ret_expr = parse_or_expr(parser);
+        if (ret_expr)
+        {
+            ast_stmt_add_expr(stmt, ret_expr);
+        }
+    }
+
+    return stmt;
 }
 
 static ASTStmt *parse_error_stmt(Parser *parser)

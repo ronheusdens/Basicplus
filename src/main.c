@@ -28,8 +28,8 @@ typedef struct
 } VersionInfo;
 
 static const VersionInfo g_version_info = {
-    "TRS-80 Level II Extended BASIC",
-    "AST-2.0.5",
+    "Basic++ Interpreter",
+    "Version 0.2.0",
     __DATE__ " " __TIME__};
 
 typedef struct
@@ -1295,7 +1295,7 @@ int main(int argc, char *argv[])
     {
         termio_printf("ERROR: Cannot open file '%s'\n", file_to_run);
         termio_printf("fopen: %s\n", strerror(errno));
-        termio_printf("\nUsage: basic-trs80-ast <filename.bas>\n");
+        termio_printf("\nUsage: basicpp <filename.bas|filename.basicpp>\n");
         compat_free(g_compat_state);
         g_compat_state = NULL;
         return 1;
