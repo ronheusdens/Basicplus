@@ -1,0 +1,5 @@
+REM Test 2: DATA after READ (like dartmouth.basicpp)
+READ X
+PRINT "Read X:", X
+DATA 100
+END

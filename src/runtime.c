@@ -1,4 +1,6 @@
 #include "runtime.h"
+#include "symtable.h"
+#include "ast.h"
 #include <string.h>
 #include <strings.h>
 #include <stdlib.h>
@@ -138,6 +140,18 @@ struct RuntimeState
 
     /* Procedure registry for storing procedure definitions */
     ProcedureRegistry *procedure_registry;
+
+    /* Class registry for storing class definitions */
+    ClassRegistry *class_registry;
+
+    /* Object instances */
+    ObjectInstance **instances;
+    int num_instances;
+    int capacity_instances;
+    int next_instance_id;
+
+    /* Execution context - set during statement execution for access from evaluator */
+    void *execution_context; /* ExecutionContext* (void* to avoid circular dependency) */
 };
 
 /* Helper to find variable by name */
@@ -261,6 +275,23 @@ RuntimeState *runtime_get_current_state(void)
     return g_current_state;
 }
 
+void runtime_set_execution_context(RuntimeState *state, void *ctx)
+{
+    if (state)
+    {
+        state->execution_context = ctx;
+    }
+}
+
+void *runtime_get_execution_context(RuntimeState *state)
+{
+    if (state)
+    {
+        return state->execution_context;
+    }
+    return NULL;
+}
+
 RuntimeState *runtime_create(void)
 {
     RuntimeState *state = xcalloc(1, sizeof(RuntimeState));
@@ -345,6 +376,15 @@ RuntimeState *runtime_create(void)
 
     /* Procedure registry for storing procedure definitions */
     state->procedure_registry = procedure_registry_create();
+
+    /* Class registry for storing class definitions */
+    state->class_registry = class_registry_create();
+
+    /* Object instances */
+    state->capacity_instances = 64;
+    state->instances = xmalloc(state->capacity_instances * sizeof(ObjectInstance *));
+    state->num_instances = 0;
+    state->next_instance_id = 1;
 
     return state;
 }
@@ -473,6 +513,25 @@ void runtime_free(RuntimeState *state)
     if (state->procedure_registry != NULL)
     {
         procedure_registry_free(state->procedure_registry);
+    }
+
+    /* Free class registry */
+    if (state->class_registry != NULL)
+    {
+        class_registry_free(state->class_registry);
+    }
+
+    /* Free object instances */
+    if (state->instances != NULL)
+    {
+        for (int i = 0; i < state->num_instances; i++)
+        {
+            if (state->instances[i] != NULL)
+            {
+                runtime_free_instance(state->instances[i]);
+            }
+        }
+        free(state->instances);
     }
 
     free(state);
@@ -1948,4 +2007,211 @@ ScopeStack *runtime_get_scope_stack(RuntimeState *state)
         return NULL;
 
     return state->scope_stack;
+}
+/* Class Registry Implementation */
+
+ClassRegistry *class_registry_create(void)
+{
+    ClassRegistry *reg = xcalloc(1, sizeof(ClassRegistry));
+    reg->capacity = 32;
+    reg->classes = xmalloc(reg->capacity * sizeof(ClassDef *));
+    reg->count = 0;
+    return reg;
+}
+
+void class_registry_free(ClassRegistry *reg)
+{
+    if (reg == NULL)
+        return;
+
+    /* Free each class definition */
+    for (int i = 0; i < reg->count; i++)
+    {
+        if (reg->classes[i] != NULL)
+        {
+            if (reg->classes[i]->name != NULL)
+                free(reg->classes[i]->name);
+            /* parameters and body are managed by AST, don't free here */
+            free(reg->classes[i]);
+        }
+    }
+
+    free(reg->classes);
+    free(reg);
+}
+
+void class_registry_add(ClassRegistry *reg, const char *name, void *parameters, void *body)
+{
+    if (reg == NULL || name == NULL)
+        return;
+
+    /* Resize if needed */
+    if (reg->count >= reg->capacity)
+    {
+        reg->capacity *= 2;
+        reg->classes = xrealloc(reg->classes, reg->capacity * sizeof(ClassDef *));
+    }
+
+    /* Create new class definition */
+    ClassDef *cls = xmalloc(sizeof(ClassDef));
+    cls->name = xstrdup(name);
+    cls->parameters = parameters;  /* Member variables */
+    cls->body = body;              /* Method definitions */
+    cls->method_procedures = NULL; /* Will be populated during parsing */
+
+    reg->classes[reg->count] = cls;
+    reg->count++;
+}
+
+ClassDef *class_registry_lookup(ClassRegistry *reg, const char *name)
+{
+    if (reg == NULL || name == NULL)
+        return NULL;
+
+    for (int i = 0; i < reg->count; i++)
+    {
+        if (strcmp(reg->classes[i]->name, name) == 0)
+            return reg->classes[i];
+    }
+
+    return NULL;
+}
+
+/* RuntimeState class access functions */
+
+void runtime_register_class(RuntimeState *state, const char *name, void *parameters, void *body)
+{
+    if (state == NULL || state->class_registry == NULL)
+        return;
+
+    class_registry_add(state->class_registry, name, parameters, body);
+}
+
+ClassDef *runtime_lookup_class(RuntimeState *state, const char *name)
+{
+    if (state == NULL || state->class_registry == NULL)
+        return NULL;
+
+    return class_registry_lookup(state->class_registry, name);
+}
+
+ClassRegistry *runtime_get_class_registry(RuntimeState *state)
+{
+    if (state == NULL)
+        return NULL;
+
+    return state->class_registry;
+}
+
+/* Object Instance Management */
+
+ObjectInstance *runtime_create_instance(RuntimeState *state, const char *class_name)
+{
+    if (state == NULL || class_name == NULL)
+        return NULL;
+
+    /* Look up the class definition */
+    ClassDef *class_def = runtime_lookup_class(state, class_name);
+    if (class_def == NULL)
+        return NULL;
+
+    /* Create a new instance */
+    ObjectInstance *instance = xcalloc(1, sizeof(ObjectInstance));
+    instance->class_name = xstrdup(class_name);
+    instance->instance_id = state->next_instance_id++;
+
+    /* Create a scope for instance variables */
+    instance->instance_scope = scope_create(scope_current(state->scope_stack));
+
+    /* Add instance to runtime's instance list */
+    if (state->num_instances >= state->capacity_instances)
+    {
+        state->capacity_instances *= 2;
+        state->instances = xrealloc(state->instances, state->capacity_instances * sizeof(ObjectInstance *));
+    }
+
+    state->instances[state->num_instances] = instance;
+    state->num_instances++;
+
+    return instance;
+}
+
+void runtime_free_instance(ObjectInstance *instance)
+{
+    if (instance == NULL)
+        return;
+
+    if (instance->class_name != NULL)
+        free(instance->class_name);
+
+    if (instance->instance_scope != NULL)
+        scope_free((Scope *)instance->instance_scope);
+
+    free(instance);
+}
+
+ObjectInstance *runtime_get_instance(RuntimeState *state, int instance_id)
+{
+    if (state == NULL)
+        return NULL;
+
+    for (int i = 0; i < state->num_instances; i++)
+    {
+        if (state->instances[i] != NULL && state->instances[i]->instance_id == instance_id)
+            return state->instances[i];
+    }
+
+    return NULL;
+}
+
+/* Instance variable access */
+
+void runtime_set_instance_variable(ObjectInstance *instance, const char *var_name, double value)
+{
+    if (instance == NULL || var_name == NULL)
+        return;
+
+    /* For now, store instance variables in RuntimeState with instance-prefixed names
+     * Format: __INST<id>_<var_name> */
+    RuntimeState *state = runtime_get_current_state();
+    if (state)
+    {
+        char full_name[256];
+        snprintf(full_name, sizeof(full_name), "__INST%d_%s", instance->instance_id, var_name);
+        runtime_set_variable(state, full_name, value);
+    }
+}
+
+void runtime_set_instance_string_variable(ObjectInstance *instance, const char *var_name, const char *value)
+{
+    if (instance == NULL || var_name == NULL)
+        return;
+
+    /* Integration with instance scope's symbol table */
+}
+
+double runtime_get_instance_variable(ObjectInstance *instance, const char *var_name)
+{
+    if (instance == NULL || var_name == NULL)
+        return 0.0;
+
+    /* Get instance variables from RuntimeState with instance-prefixed names */
+    RuntimeState *state = runtime_get_current_state();
+    if (state)
+    {
+        char full_name[256];
+        snprintf(full_name, sizeof(full_name), "__INST%d_%s", instance->instance_id, var_name);
+        return runtime_get_variable(state, full_name);
+    }
+
+    return 0.0;
+}
+
+char *runtime_get_instance_string_variable(ObjectInstance *instance, const char *var_name)
+{
+    if (instance == NULL || var_name == NULL)
+        return NULL;
+
+    /* Integration with instance scope's symbol table */
+    return NULL;
 }

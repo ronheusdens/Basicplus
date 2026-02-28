@@ -61,19 +61,12 @@ typedef enum
     STMT_DELETE,
     STMT_MERGE,
     STMT_CLEAR,
-    STMT_COLOR,
-    STMT_PCOLOR,
-    STMT_SET,
-    STMT_RESET,
-    STMT_LINE,
-    STMT_CIRCLE,
-    STMT_PAINT,
-    STMT_SCREEN,
     STMT_CASE,
     STMT_STOP,
     STMT_CONT,
     STMT_SOUND,
     STMT_PROCEDURE_DEF,
+    STMT_CLASS_DEF,
     STMT_PROCEDURE_CALL,
     STMT_UNKNOWN
 } StmtType;
@@ -92,6 +85,9 @@ typedef enum
     EXPR_BINARY_OP,
     EXPR_UNARY_OP,
     EXPR_FUNC_CALL,
+    EXPR_PROC_CALL,     /* Procedure call that returns a value */
+    EXPR_MEMBER_ACCESS, /* obj.field or obj.method */
+    EXPR_NEW,           /* NEW ClassName(...) */
     /* Legacy aliases for compatibility */
     EXPR_VARIABLE = EXPR_VAR,
     EXPR_ARRAY_ACCESS = EXPR_ARRAY,
@@ -178,6 +174,10 @@ struct ASTExpr
     ASTExpr **children;
     int num_children;
     int capacity_children;
+
+    /* Member access fields (for EXPR_MEMBER_ACCESS) */
+    ASTExpr *member_obj; /* Object expression (e.g., 'obj' in 'obj.field') */
+    char *member_name;   /* Member name (e.g., 'field' in 'obj.field') */
 };
 
 /*
@@ -203,10 +203,16 @@ struct ASTStmt
     char *var_name;     /* Variable name (for LET, FOR, DIM, INPUT, PROCEDURE_DEF, PROCEDURE_CALL) */
 
     /* Procedure-related fields */
-    ASTParameterList *parameters; /* Parameter list for PROCEDURE_DEF */
+    ASTParameterList *parameters; /* Parameter list for PROCEDURE_DEF, CLASS_DEF */
     ASTExpr **call_args;          /* Call arguments for PROCEDURE_CALL */
     int num_call_args;
     int capacity_call_args;
+
+    /* Class-related fields (for STMT_CLASS_DEF) */
+    ASTParameterList *members; /* Member variable declarations for CLASS_DEF */
+    char **method_names;       /* Names of method procedures in the class */
+    int num_methods;
+    int capacity_methods;
 
     /* DO..LOOP specific fields */
     int is_loop_end; /* 0=DO statement, 1=LOOP statement */

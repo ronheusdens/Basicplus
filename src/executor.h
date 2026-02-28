@@ -30,6 +30,7 @@ typedef struct
 {
     char **var_names;
     double *var_values;
+    int *var_existed; /* 1 if variable existed before procedure, 0 if created inside */
     int num_vars;
     int capacity;
 } ProcedureScope;
@@ -65,6 +66,10 @@ typedef struct
 int execute_program(RuntimeState *state, Program *prog);
 int execute_program_from_line(RuntimeState *state, Program *prog, int start_line_num);
 int execute_statement(RuntimeState *state, ASTStmt *stmt, Program *prog);
+
+/* Execute a procedure call in expression context and return its value */
+double executor_execute_procedure_expr(ExecutionContext *ctx, const char *proc_name,
+                                       ASTExpr **args, int num_args);
 
 void executor_set_interrupt_flag(volatile sig_atomic_t *flag);
 

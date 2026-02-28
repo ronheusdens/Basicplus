@@ -56,6 +56,37 @@ typedef struct
 } ProcedureRegistry;
 
 /*
+ * Class definition - stores parsed class for later instantiation
+ */
+typedef struct ClassDef
+{
+    char *name;              /* Class name */
+    void *parameters;        /* ASTParameterList ptr - member variables */
+    void *body;              /* ASTStmt ptr - contains method definitions */
+    void *method_procedures; /* Procedure definitions for methods */
+} ClassDef;
+
+/*
+ * Object instance - runtime representation of a class instance
+ */
+typedef struct
+{
+    char *class_name;     /* Class this instance belongs to */
+    void *instance_scope; /* Scope ptr - local variables/members for this instance */
+    int instance_id;      /* Unique identifier for this instance */
+} ObjectInstance;
+
+/*
+ * Class registry - stores all defined classes
+ */
+typedef struct
+{
+    ClassDef **classes; /* Array of class definitions */
+    int count;          /* Number of classes */
+    int capacity;       /* Allocated capacity */
+} ClassRegistry;
+
+/*
  * Runtime state (opaque structure, defined in runtime.c)
  */
 typedef struct RuntimeState RuntimeState;
@@ -196,6 +227,26 @@ struct ASTExpr *runtime_get_function_body(RuntimeState *state, const char *name)
 const char **runtime_get_function_params(RuntimeState *state, const char *name);
 int runtime_get_function_param_count(RuntimeState *state, const char *name);
 
+/* Class registry management */
+ClassRegistry *class_registry_create(void);
+void class_registry_free(ClassRegistry *reg);
+void class_registry_add(ClassRegistry *reg, const char *name, void *parameters, void *body);
+ClassDef *class_registry_lookup(ClassRegistry *reg, const char *name);
+
+/* Class access through RuntimeState */
+void runtime_register_class(RuntimeState *state, const char *name, void *parameters, void *body);
+ClassDef *runtime_lookup_class(RuntimeState *state, const char *name);
+ClassRegistry *runtime_get_class_registry(RuntimeState *state);
+
+/* Object instance management */
+ObjectInstance *runtime_create_instance(RuntimeState *state, const char *class_name);
+void runtime_free_instance(ObjectInstance *instance);
+ObjectInstance *runtime_get_instance(RuntimeState *state, int instance_id);
+void runtime_set_instance_variable(ObjectInstance *instance, const char *var_name, double value);
+double runtime_get_instance_variable(ObjectInstance *instance, const char *var_name);
+void runtime_set_instance_string_variable(ObjectInstance *instance, const char *var_name, const char *value);
+char *runtime_get_instance_string_variable(ObjectInstance *instance, const char *var_name);
+
 /* STOP/CONT support */
 void runtime_set_stop_state(RuntimeState *state, int line_number);
 void runtime_clear_stop_state(RuntimeState *state);
@@ -222,5 +273,9 @@ typedef struct
     char *string_value;
 } RuntimeVar;
 int runtime_get_var_by_index(RuntimeState *state, int index, RuntimeVar *out_var);
+
+/* Execution context access (for evaluator to call procedures as expressions) */
+void runtime_set_execution_context(RuntimeState *state, void *ctx);
+void *runtime_get_execution_context(RuntimeState *state);
 
 #endif /* RUNTIME_H */

@@ -1,0 +1,14 @@
+CLASS Counter(Count)
+    PROCEDURE Increment()
+        LET Count = Count + 1
+    END PROCEDURE
+    
+    PROCEDURE GetValue()
+        RETURN Count
+    END PROCEDURE
+END CLASS
+
+LET C = NEW Counter(5)
+C.Increment()
+PRINT C.GetValue()
+END

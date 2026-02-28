@@ -21,6 +21,8 @@ static const struct
     {"GOSUB", TOK_GOSUB},
     {"RETURN", TOK_RETURN},
     {"PROCEDURE", TOK_PROCEDURE},
+    {"CLASS", TOK_CLASS},
+    {"NEW", TOK_NEW},
     {"FOR", TOK_FOR},
     {"TO", TOK_TO},
     {"STEP", TOK_STEP},
@@ -69,13 +71,6 @@ static const struct
     {"END", TOK_END},
     {"ENDIF", TOK_ENDIF},
     {"REM", TOK_REM},
-    {"COLOR", TOK_COLOR},
-    {"PCOLOR", TOK_PCOLOR},
-    {"SET", TOK_SET},
-    {"RESET", TOK_RESET},
-    {"CIRCLE", TOK_CIRCLE},
-    {"PAINT", TOK_PAINT},
-    {"SCREEN", TOK_SCREEN},
     {"CASE", TOK_CASE},
     {"OF", TOK_OF},
     {"WHEN", TOK_WHEN},
@@ -417,6 +412,12 @@ Token *lexer_tokenize(Lexer *lexer)
             lexer->column++;
             break;
 
+        case '.':
+            add_token(lexer, TOK_DOT, ".", 0.0, NULL, lexer->line, start_col);
+            lexer->pos++;
+            lexer->column++;
+            break;
+
         case '?':
             add_token(lexer, TOK_QUESTION, "?", 0.0, NULL, lexer->line, start_col);
             lexer->pos++;
@@ -677,20 +678,6 @@ const char *token_type_name(TokenType type)
         return "ENDIF";
     case TOK_REM:
         return "REM";
-    case TOK_COLOR:
-        return "COLOR";
-    case TOK_PCOLOR:
-        return "PCOLOR";
-    case TOK_SET:
-        return "SET";
-    case TOK_RESET:
-        return "RESET";
-    case TOK_CIRCLE:
-        return "CIRCLE";
-    case TOK_PAINT:
-        return "PAINT";
-    case TOK_SCREEN:
-        return "SCREEN";
     case TOK_WHILE:
         return "WHILE";
     case TOK_WEND:
@@ -731,6 +718,14 @@ const char *token_type_name(TokenType type)
         return "TAB";
     case TOK_DEF:
         return "DEF";
+    case TOK_PROCEDURE:
+        return "PROCEDURE";
+    case TOK_CLASS:
+        return "CLASS";
+    case TOK_NEW:
+        return "NEW";
+    case TOK_DOT:
+        return "DOT";
     case TOK_NEWLINE:
         return "NEWLINE";
     default:

@@ -417,21 +417,18 @@ static int execute_stmt_internal(ExecutionContext *ctx, ASTStmt *stmt)
     case STMT_EXIT:
         result = execute_exit_stmt(ctx, stmt);
         break;
-    case STMT_COLOR:
-    case STMT_PCOLOR:
-    case STMT_SET:
-    case STMT_RESET:
-    case STMT_LINE:
-    case STMT_CIRCLE:
-    case STMT_PAINT:
-    case STMT_SCREEN:
-        result = ast_execute_stmt(stmt);
-        termio_render_graphics();
-        break;
     case STMT_PROCEDURE_DEF:
         /* PROCEDURE definition: store in registry for later calls */
         /* PHASE 1.3: Implement procedure registry */
         result = 0; /* For now, just ignore the definition */
+        break;
+    case STMT_CLASS_DEF:
+        /* CLASS definition: register in runtime class registry */
+        if (stmt->var_name)
+        {
+            runtime_register_class(ctx->runtime, stmt->var_name, stmt->parameters, stmt->body);
+        }
+        result = 0;
         break;
     case STMT_PROCEDURE_CALL:
         /* PROCEDURE call: execute the procedure with parameters */
@@ -1905,6 +1902,36 @@ static int execute_procedure_call_stmt(ExecutionContext *ctx, ASTStmt *stmt)
 
     /* Find procedure definition */
     ASTStmt *proc_def = find_procedure_def(ctx->program, stmt->var_name);
+
+    /* If not found, try method call - check if first arg is an object */
+    if (!proc_def && stmt->num_call_args > 0 && stmt->call_args[0])
+    {
+        double obj_id_val = ast_eval_expr(stmt->call_args[0]);
+        int obj_id = (int)obj_id_val;
+        ObjectInstance *instance = runtime_get_instance(ctx->runtime, obj_id);
+
+        if (instance)
+        {
+            ClassDef *class_def = runtime_lookup_class(ctx->runtime, instance->class_name);
+            if (class_def && class_def->body)
+            {
+                /* Look for method in class */
+                ASTStmt *current = (ASTStmt *)class_def->body;
+                while (current)
+                {
+                    if (current->type == STMT_PROCEDURE_DEF &&
+                        current->var_name &&
+                        strcmp(current->var_name, stmt->var_name) == 0)
+                    {
+                        proc_def = current;
+                        break;
+                    }
+                    current = current->next;
+                }
+            }
+        }
+    }
+
     if (!proc_def)
     {
         /* Procedure not found - treat as error */
@@ -1935,13 +1962,25 @@ static int execute_procedure_call_stmt(ExecutionContext *ctx, ASTStmt *stmt)
         }
     }
 
+    /* Determine if this is a method call (has object as first arg).
+     * If so, skip the first argument when binding to parameters */
+    int arg_offset = 0;
+    if (stmt->num_call_args > 0 && stmt->call_args[0])
+    {
+        double potential_obj_id = ast_eval_expr(stmt->call_args[0]);
+        if (runtime_get_instance(ctx->runtime, (int)potential_obj_id) != NULL)
+        {
+            arg_offset = 1; /* This is a method call, skip object arg */
+        }
+    }
+
     /* Bind arguments to parameters as local variables */
     if (proc_def->parameters)
     {
-        for (int i = 0; i < proc_def->parameters->num_params && i < stmt->num_call_args; i++)
+        for (int i = 0; i < proc_def->parameters->num_params && i + arg_offset < stmt->num_call_args; i++)
         {
             ASTParameter *param = proc_def->parameters->params[i];
-            ASTExpr *arg = stmt->call_args[i];
+            ASTExpr *arg = stmt->call_args[i + arg_offset];
 
             if (arg && param && param->name)
             {
@@ -1950,6 +1989,42 @@ static int execute_procedure_call_stmt(ExecutionContext *ctx, ASTStmt *stmt)
 
                 /* Store argument as local variable in procedure scope */
                 runtime_set_variable(ctx->runtime, param->name, arg_value);
+            }
+        }
+    }
+
+    /* If this is a method call, bind instance variables to global scope */
+    ObjectInstance *method_instance = NULL;
+    ClassDef *method_class_def = NULL;
+    if (arg_offset == 1 && stmt->num_call_args > 0)
+    {
+        double obj_id_val = ast_eval_expr(stmt->call_args[0]);
+        method_instance = runtime_get_instance(ctx->runtime, (int)obj_id_val);
+        if (method_instance)
+        {
+            method_class_def = runtime_lookup_class(ctx->runtime, method_instance->class_name);
+            if (method_class_def && method_class_def->parameters)
+            {
+                ASTParameterList *class_params = (ASTParameterList *)method_class_def->parameters;
+                /* Bind instance variables to global scope for method execution */
+                for (int i = 0; i < class_params->num_params; i++)
+                {
+                    ASTParameter *param = class_params->params[i];
+                    if (param && param->name)
+                    {
+                        /* Save current global value */
+                        double old_value = 0.0;
+                        if (runtime_has_variable(ctx->runtime, param->name))
+                        {
+                            old_value = runtime_get_variable(ctx->runtime, param->name);
+                        }
+                        proc_scope_save_var(ctx, param->name, old_value);
+
+                        /* Set instance variable value in global scope */
+                        double inst_value = runtime_get_instance_variable(method_instance, param->name);
+                        runtime_set_variable(ctx->runtime, param->name, inst_value);
+                    }
+                }
             }
         }
     }
@@ -1969,6 +2044,23 @@ static int execute_procedure_call_stmt(ExecutionContext *ctx, ASTStmt *stmt)
 
     /* Save return value before scope restoration */
     double return_value = ctx->proc_return_value;
+
+    /* If this was a method call, save modified instance variables back */
+    if (method_instance && method_class_def && method_class_def->parameters)
+    {
+        ASTParameterList *class_params = (ASTParameterList *)method_class_def->parameters;
+        for (int i = 0; i < class_params->num_params; i++)
+        {
+            ASTParameter *param = class_params->params[i];
+            if (param && param->name)
+            {
+                /* Get current value from global scope (may have been modified by method) */
+                double current_value = runtime_get_variable(ctx->runtime, param->name);
+                /* Save back to instance */
+                runtime_set_instance_variable(method_instance, param->name, current_value);
+            }
+        }
+    }
 
     /* Restore procedure context */
     ctx->proc_return_flag = saved_proc_return_flag;
@@ -2987,6 +3079,9 @@ int execute_program(RuntimeState *state, Program *prog)
     ctx.proc_return_value = 0.0;
     ctx.in_procedure = 0;
 
+    /* Set execution context so expressions can access it */
+    runtime_set_execution_context(state, &ctx);
+
     preload_data(state, prog);
 
     /* Execute program line by line */
@@ -3131,6 +3226,9 @@ int execute_program_from_line(RuntimeState *state, Program *prog, int start_line
     ctx.proc_return_value = 0.0;
     ctx.in_procedure = 0;
 
+    /* Set execution context so expressions can access it */
+    runtime_set_execution_context(state, &ctx);
+
     preload_data(state, prog);
 
     /* Execute program line by line */
@@ -3261,7 +3359,198 @@ int execute_statement(RuntimeState *state, ASTStmt *stmt, Program *prog)
     ctx.proc_return_value = 0.0;
     ctx.in_procedure = 0;
 
+    /* Set execution context so expressions can access it */
+    runtime_set_execution_context(state, &ctx);
+
     return execute_stmt_internal(&ctx, stmt);
+}
+
+/* Execute a procedure call in expression context and return its value */
+double executor_execute_procedure_expr(ExecutionContext *ctx, const char *proc_name,
+                                       ASTExpr **args, int num_args)
+{
+    if (!ctx || !proc_name)
+        return 0.0;
+
+    /* Find procedure definition */
+    ASTStmt *proc_def = find_procedure_def(ctx->program, proc_name);
+
+    /* If not found, try method call - check if first arg is an object */
+    if (!proc_def && num_args > 0 && args && args[0])
+    {
+        double obj_id_val = ast_eval_expr(args[0]);
+        int obj_id = (int)obj_id_val;
+        ObjectInstance *instance = runtime_get_instance(ctx->runtime, obj_id);
+
+        if (instance)
+        {
+            ClassDef *class_def = runtime_lookup_class(ctx->runtime, instance->class_name);
+            if (class_def && class_def->body)
+            {
+                /* Look for method in class */
+                ASTStmt *current = (ASTStmt *)class_def->body;
+                while (current)
+                {
+                    if (current->type == STMT_PROCEDURE_DEF &&
+                        current->var_name &&
+                        strcmp(current->var_name, proc_name) == 0)
+                    {
+                        proc_def = current;
+                        break;
+                    }
+                    current = current->next;
+                }
+            }
+        }
+    }
+
+    if (!proc_def)
+    {
+        runtime_set_error(ctx->runtime, 251, 0); /* Illegal function call */
+        return 0.0;
+    }
+
+    /* Create and push a new scope for this procedure call */
+    ProcedureScope *new_scope = proc_scope_create();
+    proc_scope_push(ctx, new_scope);
+
+    /* Save original values of parameter names (to restore after) */
+    if (proc_def->parameters)
+    {
+        for (int i = 0; i < proc_def->parameters->num_params; i++)
+        {
+            ASTParameter *param = proc_def->parameters->params[i];
+            if (param && param->name)
+            {
+                /* Save the original value if variable exists */
+                double original_value = 0.0;
+                if (runtime_has_variable(ctx->runtime, param->name))
+                {
+                    original_value = runtime_get_variable(ctx->runtime, param->name);
+                }
+                proc_scope_save_var(ctx, param->name, original_value);
+            }
+        }
+    }
+
+    /* Determine if this is a method call (has object as first arg) */
+    int arg_offset = 0;
+    ObjectInstance *method_instance = NULL;
+    ClassDef *method_class_def = NULL;
+
+    if (num_args > 0 && args && args[0])
+    {
+        double potential_obj_id = ast_eval_expr(args[0]);
+        method_instance = runtime_get_instance(ctx->runtime, (int)potential_obj_id);
+        if (method_instance)
+        {
+            arg_offset = 1; /* This is a method call, skip object arg */
+            method_class_def = runtime_lookup_class(ctx->runtime, method_instance->class_name);
+        }
+    }
+
+    /* Bind arguments to parameters as local variables */
+    if (proc_def->parameters)
+    {
+        for (int i = 0; i < proc_def->parameters->num_params && i + arg_offset < num_args; i++)
+        {
+            ASTParameter *param = proc_def->parameters->params[i];
+            ASTExpr *arg = args[i + arg_offset];
+
+            if (arg && param && param->name)
+            {
+                /* Evaluate argument in caller's scope */
+                double arg_value = ast_eval_expr(arg);
+
+                /* Store argument as local variable in procedure scope */
+                runtime_set_variable(ctx->runtime, param->name, arg_value);
+            }
+        }
+    }
+
+    /* If this is a method call, bind instance variables to global scope */
+    if (method_instance && method_class_def && method_class_def->parameters)
+    {
+        ASTParameterList *class_params = (ASTParameterList *)method_class_def->parameters;
+        /* Bind instance variables to global scope for method execution */
+        for (int i = 0; i < class_params->num_params; i++)
+        {
+            ASTParameter *param = class_params->params[i];
+            if (param && param->name)
+            {
+                /* Save current global value */
+                double old_value = 0.0;
+                if (runtime_has_variable(ctx->runtime, param->name))
+                {
+                    old_value = runtime_get_variable(ctx->runtime, param->name);
+                }
+                proc_scope_save_var(ctx, param->name, old_value);
+
+                /* Set instance variable value in global scope */
+                double inst_value = runtime_get_instance_variable(method_instance, param->name);
+                runtime_set_variable(ctx->runtime, param->name, inst_value);
+            }
+        }
+    }
+
+    /* Mark that we're in a procedure */
+    int saved_in_procedure = ctx->in_procedure;
+    ctx->in_procedure = 1;
+    int saved_proc_return_flag = ctx->proc_return_flag;
+    ctx->proc_return_flag = 0;
+
+    /* Execute procedure body */
+    int result = 0;
+    if (proc_def->body)
+    {
+        result = execute_stmt_internal(ctx, proc_def->body);
+    }
+
+    /* Save return value before scope restoration */
+    double return_value = ctx->proc_return_value;
+
+    /* If this was a method call, save modified instance variables back */
+    if (method_instance && method_class_def && method_class_def->parameters)
+    {
+        ASTParameterList *class_params = (ASTParameterList *)method_class_def->parameters;
+        for (int i = 0; i < class_params->num_params; i++)
+        {
+            ASTParameter *param = class_params->params[i];
+            if (param && param->name)
+            {
+                /* Get current value from global scope (may have been modified by method) */
+                double current_value = runtime_get_variable(ctx->runtime, param->name);
+                /* Save back to instance */
+                runtime_set_instance_variable(method_instance, param->name, current_value);
+            }
+        }
+    }
+
+    /* Restore procedure context */
+    ctx->proc_return_flag = saved_proc_return_flag;
+    ctx->in_procedure = saved_in_procedure;
+
+    /* Restore global variables shadowed by parameters */
+    ProcedureScope *scope = proc_scope_pop(ctx);
+    if (scope)
+    {
+        for (int i = 0; i < scope->num_vars; i++)
+        {
+            /* Only restore if the variable existed before the call */
+            if (scope->var_values[i] != 0.0 || runtime_has_variable(ctx->runtime, scope->var_names[i]))
+            {
+                runtime_set_variable(ctx->runtime, scope->var_names[i], scope->var_values[i]);
+            }
+            else
+            {
+                /* Variable was created in procedure, remove it from global scope */
+                runtime_delete_variable(ctx->runtime, scope->var_names[i]);
+            }
+        }
+        proc_scope_free(scope);
+    }
+
+    return return_value;
 }
 
 /* Accessor for trace support to avoid exposing ExecutionContext struct layout */

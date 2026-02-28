@@ -1,0 +1,7 @@
+REM IF-ENDIF without FOR loop
+READ N
+IF N > 0 THEN
+    PRINT N
+ENDIF
+DATA 5
+END

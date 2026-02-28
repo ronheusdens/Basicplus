@@ -279,6 +279,16 @@ void ast_expr_print(ASTExpr *expr)
         }
         printf(")");
         break;
+    case EXPR_PROC_CALL:
+        printf("%s(", expr->var_name ? expr->var_name : "(unnamed)");
+        for (int i = 0; i < expr->num_children; i++)
+        {
+            if (i > 0)
+                printf(", ");
+            ast_expr_print(expr->children[i]);
+        }
+        printf(")");
+        break;
     case EXPR_BINARY_OP:
         printf("(");
         if (expr->num_children >= 1)
@@ -476,6 +486,8 @@ const char *expr_type_name(ExprType type)
         return "UNARY_OP";
     case EXPR_FUNC_CALL:
         return "FUNC_CALL";
+    case EXPR_PROC_CALL:
+        return "PROC_CALL";
     default:
         return "UNKNOWN";
     }

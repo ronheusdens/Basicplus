@@ -4,17 +4,15 @@ PROCEDURE CalcFunc(X)
 END PROCEDURE
 
 READ N
-LET A = 0: B = 1: X = 0.5
+LET A = 0 : B = 1 : X = 0.5
 FOR I = 1 TO N
-    CalcFunc(X)
-    IF result > 0 THEN
+    IF CalcFunc(X) > 0 THEN
         LET B = X
     ELSE
         LET A = X
     ENDIF
     LET X = (A+B)/2
 NEXT I
-CalcFunc(X)
-PRINT X, result
+PRINT "Root found:", X, "Value:", CalcFunc(X)
 DATA 20
 END

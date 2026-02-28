@@ -1,0 +1,55 @@
+' Phase 2: Object-Oriented Features Test
+
+' Test 1: Basic Class Definition
+CLASS Point(X, Y)
+    PROCEDURE Distance(X2, Y2)
+        LET DX = X2 - X
+        LET DY = Y2 - Y
+        RETURN SQR(DX^2 + DY^2)
+    END PROCEDURE
+END CLASS
+
+' Test 2: Class Instantiation with NEW
+LET P1 = NEW Point(3, 4)
+LET P2 = NEW Point(0, 0)
+
+' Test 3: Method Calls
+LET DIST = P1.Distance(6, 8)
+PRINT "Distance from P1 to (6, 8):", DIST
+
+' Test 4: Multiple Instances
+CLASS Rectangle(W, H)
+    PROCEDURE Area()
+        RETURN W * H
+    END PROCEDURE
+    
+    PROCEDURE Perimeter()
+        RETURN 2 * (W + H)
+    END PROCEDURE
+END CLASS
+
+LET R1 = NEW Rectangle(5, 3)
+LET R2 = NEW Rectangle(10, 7)
+
+PRINT "R1 Area:", R1.Area()
+PRINT "R1 Perimeter:", R1.Perimeter()
+PRINT "R2 Area:", R2.Area()
+PRINT "R2 Perimeter:", R2.Perimeter()
+
+' Test 5: Member Access / Property-like Methods
+CLASS Circle(Radius)
+    PROCEDURE Circumference()
+        RETURN 2 * 3.14159 * Radius
+    END PROCEDURE
+    
+    PROCEDURE GetRadius()
+        RETURN Radius
+    END PROCEDURE
+END CLASS
+
+LET C = NEW Circle(5)
+PRINT "Circle circumference:", C.Circumference()
+PRINT "Circle radius:", C.GetRadius()
+
+PRINT "Phase 2 Classes Test Complete"
+END

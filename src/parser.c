@@ -23,6 +23,7 @@ static ASTExpr *parse_additive_expr(Parser *parser);
 static ASTExpr *parse_multiplicative_expr(Parser *parser);
 static ASTExpr *parse_power_expr(Parser *parser);
 static ASTExpr *parse_unary_expr(Parser *parser);
+static ASTExpr *parse_member_expr(Parser *parser);
 static ASTExpr *parse_primary_expr(Parser *parser);
 
 static int is_builtin_function(const char *name)
@@ -81,14 +82,6 @@ static ASTStmt *parse_end_stmt(Parser *parser);
 static ASTStmt *parse_rem_stmt(Parser *parser);
 static ASTStmt *parse_def_stmt(Parser *parser, StmtType type);
 static ASTStmt *parse_def_fn_stmt(Parser *parser);
-static ASTStmt *parse_color_stmt(Parser *parser);
-static ASTStmt *parse_pcolor_stmt(Parser *parser);
-static ASTStmt *parse_set_stmt(Parser *parser);
-static ASTStmt *parse_reset_stmt(Parser *parser);
-static ASTStmt *parse_line_stmt(Parser *parser);
-static ASTStmt *parse_circle_stmt(Parser *parser);
-static ASTStmt *parse_paint_stmt(Parser *parser);
-static ASTStmt *parse_screen_stmt(Parser *parser);
 static ASTStmt *parse_case_stmt(Parser *parser);
 static ASTStmt *parse_sound_stmt(Parser *parser);
 
@@ -237,13 +230,6 @@ static int is_statement_token(Token *tok)
     case TOK_DEFSTR:
     case TOK_TRON:
     case TOK_TROFF:
-    case TOK_COLOR:
-    case TOK_PCOLOR:
-    case TOK_SET:
-    case TOK_RESET:
-    case TOK_CIRCLE:
-    case TOK_PAINT:
-    case TOK_SCREEN:
     case TOK_CASE:
     case TOK_STOP:
     case TOK_CONT:
@@ -427,6 +413,149 @@ static ASTStmt *parse_procedure_def(Parser *parser)
     return proc;
 }
 
+static ASTStmt *parse_class_def(Parser *parser)
+{
+    if (!parser || !current_token(parser) || current_token(parser)->type != TOK_CLASS)
+    {
+        return NULL;
+    }
+
+    advance(parser); /* consume CLASS */
+
+    Token *name_tok = current_token(parser);
+    if (!name_tok || name_tok->type != TOK_IDENTIFIER)
+    {
+        parser_error(parser, "Expected class name");
+        return NULL;
+    }
+
+    char *class_name = xstrdup(name_tok->value);
+    advance(parser);
+
+    /* Optional: class MAY have member variable declarations like:
+     * CLASS Point
+     *   X
+     *   Y
+     * END CLASS
+     *
+     * For Phase 2, we'll keep it simple and support all statements as "member procedures"
+     * Member variables can be initialized in method bodies */
+
+    if (!expect(parser, TOK_LPAREN, "Expected '(' after class name"))
+    {
+        free(class_name);
+        return NULL;
+    }
+
+    /* Parse member parameters (like constructor args) */
+    ASTParameterList *members = parse_parameter_list(parser);
+
+    if (!expect(parser, TOK_RPAREN, "Expected ')' after member list"))
+    {
+        ast_parameter_list_free(members);
+        free(class_name);
+        return NULL;
+    }
+
+    /* Skip newline after class header */
+    match(parser, TOK_NEWLINE);
+
+    /* Parse body: method definitions (PROCEDURE statements) until END CLASS */
+    ASTStmt *body = NULL;
+    ASTStmt *body_tail = NULL;
+
+    while (current_token(parser) && current_token(parser)->type != TOK_EOF)
+    {
+        Token *tok = current_token(parser);
+
+        /* Skip newlines */
+        if (tok->type == TOK_NEWLINE)
+        {
+            advance(parser);
+            continue;
+        }
+
+        /* Check for END CLASS */
+        if (tok->type == TOK_END)
+        {
+            Token *next = peek_next_token(parser);
+            if (next && next->type == TOK_CLASS)
+            {
+                break; /* Exit the loop */
+            }
+        }
+
+        /* Inside a class, we expect PROCEDURE definitions as methods */
+        if (tok->type == TOK_PROCEDURE)
+        {
+            ASTStmt *method = parse_procedure_def(parser);
+            if (method)
+            {
+                if (!body)
+                {
+                    body = method;
+                    body_tail = method;
+                }
+                else
+                {
+                    body_tail->next = method;
+                    body_tail = method;
+                }
+            }
+        }
+        else
+        {
+            ASTStmt *stmt = parse_statement(parser);
+            if (stmt)
+            {
+                if (!body)
+                {
+                    body = stmt;
+                    body_tail = stmt;
+                }
+                else
+                {
+                    body_tail->next = stmt;
+                    body_tail = stmt;
+                }
+            }
+        }
+
+        /* Skip newlines and colons between statements */
+        while (current_token(parser) && (current_token(parser)->type == TOK_NEWLINE || current_token(parser)->type == TOK_COLON))
+        {
+            advance(parser);
+        }
+    }
+
+    /* Expect END CLASS */
+    if (current_token(parser) && current_token(parser)->type == TOK_END)
+    {
+        advance(parser);
+        if (!expect(parser, TOK_CLASS, "Expected CLASS after END"))
+        {
+            ast_parameter_list_free(members);
+            free(class_name);
+            return NULL;
+        }
+    }
+    else
+    {
+        parser_error(parser, "Expected END CLASS");
+        ast_parameter_list_free(members);
+        free(class_name);
+        return NULL;
+    }
+
+    /* Create the class definition statement */
+    ASTStmt *cls = ast_stmt_create(STMT_CLASS_DEF);
+    cls->var_name = class_name;
+    cls->parameters = members;
+    cls->body = body;
+
+    return cls;
+}
+
 Program *parse_program(Parser *parser)
 {
     if (parser == NULL)
@@ -451,8 +580,24 @@ Program *parse_program(Parser *parser)
             continue;
         }
 
+        /* Check for CLASS definition (Phase 2 Basic++) */
+        if (tok->type == TOK_CLASS)
+        {
+            ASTStmt *cls = parse_class_def(parser);
+            if (cls)
+            {
+                /* Store class as a ProgramLine with line_num=0 (special marker) */
+                ProgramLine *pline = ast_program_line_create(0, cls);
+                ast_program_add_line(prog, pline);
+            }
+            else if (parser_has_error(parser))
+            {
+                /* Error occurred, skip to next statement */
+                advance(parser);
+            }
+        }
         /* Check for PROCEDURE definition (Phase 1 Basic++) */
-        if (tok->type == TOK_PROCEDURE)
+        else if (tok->type == TOK_PROCEDURE)
         {
             ASTStmt *proc = parse_procedure_def(parser);
             if (proc)
@@ -592,7 +737,9 @@ ASTStmt *parse_statement(Parser *parser)
         {
             return parse_line_input_stmt(parser);
         }
-        return parse_line_stmt(parser);
+        /* LINE without INPUT is not supported (graphics removed) */
+        parser_error(parser, "Unexpected LINE statement (did you mean LINE INPUT?)");
+        return NULL;
     }
     case TOK_LET:
         return parse_let_stmt(parser);
@@ -672,20 +819,6 @@ ASTStmt *parse_statement(Parser *parser)
     case TOK_TROFF:
         advance(parser); /* consume TROFF */
         return ast_stmt_create(STMT_TROFF);
-    case TOK_COLOR:
-        return parse_color_stmt(parser);
-    case TOK_PCOLOR:
-        return parse_pcolor_stmt(parser);
-    case TOK_SET:
-        return parse_set_stmt(parser);
-    case TOK_RESET:
-        return parse_reset_stmt(parser);
-    case TOK_CIRCLE:
-        return parse_circle_stmt(parser);
-    case TOK_PAINT:
-        return parse_paint_stmt(parser);
-    case TOK_SCREEN:
-        return parse_screen_stmt(parser);
     case TOK_CASE:
         return parse_case_stmt(parser);
     case TOK_STOP:
@@ -716,167 +849,6 @@ ASTStmt *parse_statement(Parser *parser)
 }
 
 /* Statement implementations */
-// Stub implementations for CoCo graphics/color statements
-static ASTStmt *parse_color_stmt(Parser *parser)
-{
-    advance(parser); // consume COLOR
-    ASTStmt *stmt = ast_stmt_create(STMT_COLOR);
-    // Parse: COLOR foreground [, background]
-    ASTExpr *foreground = parse_expression(parser);
-    if (foreground)
-        ast_stmt_add_expr(stmt, foreground);
-    if (match(parser, TOK_COMMA))
-    {
-        ASTExpr *background = parse_expression(parser);
-        if (background)
-            ast_stmt_add_expr(stmt, background);
-    }
-    return stmt;
-}
-
-static ASTStmt *parse_pcolor_stmt(Parser *parser)
-{
-    advance(parser); // consume PCOLOR
-    ASTStmt *stmt = ast_stmt_create(STMT_PCOLOR);
-    // Parse: PCOLOR palette_index
-    ASTExpr *palette = parse_expression(parser);
-    if (palette)
-        ast_stmt_add_expr(stmt, palette);
-    return stmt;
-}
-
-static ASTStmt *parse_set_stmt(Parser *parser)
-{
-    advance(parser); // consume SET
-    ASTStmt *stmt = ast_stmt_create(STMT_SET);
-    // Parse: SET x, y [, color]
-    ASTExpr *x = parse_expression(parser);
-    if (x)
-        ast_stmt_add_expr(stmt, x);
-    if (match(parser, TOK_COMMA))
-    {
-        ASTExpr *y = parse_expression(parser);
-        if (y)
-            ast_stmt_add_expr(stmt, y);
-        if (match(parser, TOK_COMMA))
-        {
-            ASTExpr *color = parse_expression(parser);
-            if (color)
-                ast_stmt_add_expr(stmt, color);
-        }
-    }
-    return stmt;
-}
-
-static ASTStmt *parse_reset_stmt(Parser *parser)
-{
-    advance(parser); // consume RESET
-    ASTStmt *stmt = ast_stmt_create(STMT_RESET);
-    // Parse: RESET x, y
-    ASTExpr *x = parse_expression(parser);
-    if (x)
-        ast_stmt_add_expr(stmt, x);
-    if (match(parser, TOK_COMMA))
-    {
-        ASTExpr *y = parse_expression(parser);
-        if (y)
-            ast_stmt_add_expr(stmt, y);
-    }
-    return stmt;
-}
-
-static ASTStmt *parse_line_stmt(Parser *parser)
-{
-    advance(parser); /* consume LINE */
-    ASTStmt *stmt = ast_stmt_create(STMT_LINE);
-    /* Parse: LINE x1, y1, x2, y2 [, color] or polygon: LINE x1,y1, x2,y2, ... */
-    while (current_token(parser) && current_token(parser)->type != TOK_NEWLINE &&
-           current_token(parser)->type != TOK_COLON && current_token(parser)->type != TOK_EOF)
-    {
-        if (match(parser, TOK_COMMA))
-        {
-            continue;
-        }
-        ASTExpr *expr = parse_expression(parser);
-        if (expr)
-        {
-            ast_stmt_add_expr(stmt, expr);
-        }
-        else
-        {
-            break;
-        }
-        if (!match(parser, TOK_COMMA))
-        {
-            break;
-        }
-    }
-    return stmt;
-}
-
-static ASTStmt *parse_circle_stmt(Parser *parser)
-{
-    advance(parser); // consume CIRCLE
-    ASTStmt *stmt = ast_stmt_create(STMT_CIRCLE);
-    // Parse: CIRCLE x, y, radius [, color]
-    ASTExpr *x = parse_expression(parser);
-    if (x)
-        ast_stmt_add_expr(stmt, x);
-    if (match(parser, TOK_COMMA))
-    {
-        ASTExpr *y = parse_expression(parser);
-        if (y)
-            ast_stmt_add_expr(stmt, y);
-        if (match(parser, TOK_COMMA))
-        {
-            ASTExpr *radius = parse_expression(parser);
-            if (radius)
-                ast_stmt_add_expr(stmt, radius);
-            if (match(parser, TOK_COMMA))
-            {
-                ASTExpr *color = parse_expression(parser);
-                if (color)
-                    ast_stmt_add_expr(stmt, color);
-            }
-        }
-    }
-    return stmt;
-}
-
-static ASTStmt *parse_paint_stmt(Parser *parser)
-{
-    advance(parser); // consume PAINT
-    ASTStmt *stmt = ast_stmt_create(STMT_PAINT);
-    // Parse: PAINT x, y [, color]
-    ASTExpr *x = parse_expression(parser);
-    if (x)
-        ast_stmt_add_expr(stmt, x);
-    if (match(parser, TOK_COMMA))
-    {
-        ASTExpr *y = parse_expression(parser);
-        if (y)
-            ast_stmt_add_expr(stmt, y);
-        if (match(parser, TOK_COMMA))
-        {
-            ASTExpr *color = parse_expression(parser);
-            if (color)
-                ast_stmt_add_expr(stmt, color);
-        }
-    }
-    return stmt;
-}
-
-static ASTStmt *parse_screen_stmt(Parser *parser)
-{
-    advance(parser); // consume SCREEN
-    ASTStmt *stmt = ast_stmt_create(STMT_SCREEN);
-    // Parse: SCREEN mode
-    ASTExpr *mode = parse_expression(parser);
-    if (mode)
-        ast_stmt_add_expr(stmt, mode);
-    return stmt;
-}
-
 static ASTStmt *parse_case_stmt(Parser *parser)
 {
     advance(parser); /* consume CASE */
@@ -1397,9 +1369,12 @@ static ASTStmt *parse_line_input_stmt(Parser *parser)
 
 static ASTStmt *parse_let_stmt(Parser *parser)
 {
+    int has_let_keyword = 0;
+
     /* Optional LET keyword */
     if (current_token(parser) && current_token(parser)->type == TOK_LET)
     {
+        has_let_keyword = 1;
         advance(parser);
     }
 
@@ -1412,6 +1387,137 @@ static ASTStmt *parse_let_stmt(Parser *parser)
 
     char *var_name = xstrdup(tok->value);
     advance(parser);
+
+    /* Check for member access (dot notation) OR array subscript/procedure call */
+    if (current_token(parser) && current_token(parser)->type == TOK_DOT)
+    {
+        /* This is member access: obj.method(args) or obj.field */
+
+        /* Parse member name */
+        if (!current_token(parser) || current_token(parser)->type != TOK_DOT)
+        {
+            parser_error(parser, "Expected '.' in member access");
+            free(var_name);
+            return NULL;
+        }
+
+        advance(parser); /* consume . */
+
+        if (!current_token(parser) || current_token(parser)->type != TOK_IDENTIFIER)
+        {
+            parser_error(parser, "Expected member name after '.'");
+            free(var_name);
+            return NULL;
+        }
+
+        char *member_name = xstrdup(current_token(parser)->value);
+        advance(parser);
+
+        /* Check if this is a method call: obj.method(...) */
+        if (current_token(parser) && current_token(parser)->type == TOK_LPAREN)
+        {
+            /* Method call: obj.method(arg1, arg2, ...) */
+            advance(parser); /* consume ( */
+
+            ASTExpr **args = xmalloc(sizeof(ASTExpr *) * 10);
+            int arg_count = 0;
+            int arg_capacity = 10;
+
+            /* Parse arguments */
+            if (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
+            {
+                ASTExpr *arg = parse_expression(parser);
+                if (arg)
+                {
+                    args[arg_count++] = arg;
+                }
+
+                while (match(parser, TOK_COMMA))
+                {
+                    arg = parse_expression(parser);
+                    if (arg)
+                    {
+                        if (arg_count >= arg_capacity)
+                        {
+                            arg_capacity *= 2;
+                            args = xrealloc(args, arg_capacity * sizeof(ASTExpr *));
+                        }
+                        args[arg_count++] = arg;
+                    }
+                }
+            }
+
+            if (!expect(parser, TOK_RPAREN, "Expected ')' after method arguments"))
+            {
+                for (int i = 0; i < arg_count; i++)
+                    ast_expr_free(args[i]);
+                free(args);
+                free(var_name);
+                free(member_name);
+                return NULL;
+            }
+
+            /* Create a procedure call statement for the method
+             * The object will be passed as the first implicit argument */
+            ASTStmt *stmt = ast_stmt_create(STMT_PROCEDURE_CALL);
+            stmt->var_name = member_name;
+
+            /* First arg is the object (as an EXPR_VAR) */
+            ASTExpr *obj_expr = ast_expr_create(EXPR_VAR);
+            obj_expr->var_name = var_name;
+            stmt->call_args = xmalloc(sizeof(ASTExpr *) * (arg_count + 1));
+            stmt->call_args[0] = obj_expr;
+            stmt->num_call_args = 1;
+            stmt->capacity_call_args = arg_count + 1;
+
+            /* Copy user-supplied arguments */
+            for (int i = 0; i < arg_count; i++)
+            {
+                stmt->call_args[1 + i] = args[i];
+                stmt->num_call_args++;
+            }
+
+            free(args);
+            return stmt;
+        }
+        else if (current_token(parser) && current_token(parser)->type == TOK_EQ)
+        {
+            /* Member assignment: obj.field = value */
+            advance(parser); /* consume = */
+
+            ASTExpr *rhs = parse_expression(parser);
+            if (!rhs)
+            {
+                free(var_name);
+                free(member_name);
+                return NULL;
+            }
+
+            /* Create special LET statement for member assignment */
+            ASTStmt *stmt = ast_stmt_create(STMT_LET);
+
+            /* LHS is member access */
+            ASTExpr *member_expr = ast_expr_create(EXPR_MEMBER_ACCESS);
+            ASTExpr *obj_expr = ast_expr_create(EXPR_VAR);
+            obj_expr->var_name = var_name;
+            member_expr->member_obj = obj_expr;
+            member_expr->member_name = member_name;
+
+            ast_stmt_add_expr(stmt, member_expr);
+            ast_stmt_add_expr(stmt, rhs);
+
+            return stmt;
+        }
+        else
+        {
+            /* Just member access without call or assignment: obj.field
+             * This is an error in a statement context */
+            parser_error(parser, "Unexpected member access without assignment or call");
+            free(var_name);
+            free(member_name);
+            return NULL;
+        }
+    }
 
     /* Check for array subscript or procedure call */
     ASTExpr *lhs = ast_expr_create(EXPR_VAR);
@@ -1494,6 +1600,7 @@ static ASTStmt *parse_let_stmt(Parser *parser)
         }
     }
 
+    /* Must be an assignment */
     if (!expect(parser, TOK_EQ, "Expected '=' in assignment"))
     {
         ast_expr_free(lhs);
@@ -1549,97 +1656,96 @@ static ASTStmt *parse_if_stmt(Parser *parser)
             return NULL;
         }
         advance(parser); // consume NEWLINE after THEN
-        ASTStmt *block_head = NULL;
-        ASTStmt *block_tail = NULL;
+
+        ASTStmt *then_block_head = NULL;
+        ASTStmt *then_block_tail = NULL;
         ASTStmt *else_block_head = NULL;
         ASTStmt *else_block_tail = NULL;
         int in_else_block = 0;
 
+        // BasicPP: Line-number-free parsing
+        // Look for statements until ENDIF is found
         while (1)
         {
             Token *ctok = current_token(parser);
-            // Only accept NUMBER as start of each block line
+
+            // End of input
             if (!ctok || ctok->type == TOK_EOF)
-                break;
-            if (ctok->type == TOK_NUMBER)
             {
-                int save_pos = parser->pos;
-                advance(parser); // skip line number
-                Token *peek = current_token(parser);
+                parser_error(parser, "Expected ENDIF to close IF block");
+                break;
+            }
 
-                // Check for ELSE keyword
-                if (peek && peek->type == TOK_ELSE)
+            // Check for ELSE keyword
+            if (ctok->type == TOK_ELSE)
+            {
+                advance(parser); // consume ELSE
+                in_else_block = 1;
+                // Consume optional NEWLINE after ELSE
+                if (current_token(parser) && current_token(parser)->type == TOK_NEWLINE)
                 {
-                    advance(parser); // skip ELSE
-                    in_else_block = 1;
-                    // Consume optional newline after ELSE
-                    if (current_token(parser) && current_token(parser)->type == TOK_NEWLINE)
-                        advance(parser);
-                    continue;
+                    advance(parser);
                 }
+                continue;
+            }
 
-                // Check for ENDIF keyword
-                if (peek && peek->type == TOK_ENDIF)
+            // Check for ENDIF keyword
+            if (ctok->type == TOK_ENDIF)
+            {
+                advance(parser); // consume ENDIF
+                // Consume optional NEWLINE after ENDIF
+                if (current_token(parser) && current_token(parser)->type == TOK_NEWLINE)
                 {
-                    // Found numbered ENDIF line, treat as block end
-                    advance(parser); // skip ENDIF
-                    // Optionally consume trailing NEWLINE
-                    if (current_token(parser) && current_token(parser)->type == TOK_NEWLINE)
-                        advance(parser);
-                    break;
+                    advance(parser);
                 }
+                break;
+            }
 
-                // Parse as statement in current block (THEN or ELSE)
-                parser->pos = save_pos;
-                // Parse the line as a normal BASIC line
-                ProgramLine *pline = parse_line(parser);
-                if (pline && pline->stmt)
+            // Parse a statement in the current block (THEN or ELSE)
+            ASTStmt *stmt = parse_statement(parser);
+            if (stmt)
+            {
+                if (!in_else_block)
                 {
-                    if (!in_else_block)
+                    // Add to THEN block
+                    if (!then_block_head)
                     {
-                        // Add to THEN block
-                        if (!block_head)
-                        {
-                            block_head = pline->stmt;
-                            block_tail = pline->stmt;
-                        }
-                        else
-                        {
-                            block_tail->next = pline->stmt;
-                            block_tail = pline->stmt;
-                        }
+                        then_block_head = stmt;
+                        then_block_tail = stmt;
                     }
                     else
                     {
-                        // Add to ELSE block
-                        if (!else_block_head)
-                        {
-                            else_block_head = pline->stmt;
-                            else_block_tail = pline->stmt;
-                        }
-                        else
-                        {
-                            else_block_tail->next = pline->stmt;
-                            else_block_tail = pline->stmt;
-                        }
+                        then_block_tail->next = stmt;
+                        then_block_tail = stmt;
                     }
                 }
                 else
                 {
-                    // If parse_line fails, skip to next NUMBER
-                    while (current_token(parser) && current_token(parser)->type != TOK_NUMBER && current_token(parser)->type != TOK_EOF)
-                        advance(parser);
+                    // Add to ELSE block
+                    if (!else_block_head)
+                    {
+                        else_block_head = stmt;
+                        else_block_tail = stmt;
+                    }
+                    else
+                    {
+                        else_block_tail->next = stmt;
+                        else_block_tail = stmt;
+                    }
                 }
-                continue;
             }
-            // Skip anything else (should not occur in well-formed BASIC)
-            advance(parser);
+
+            // Consume NEWLINE if present to move to next line
+            if (current_token(parser) && current_token(parser)->type == TOK_NEWLINE)
+            {
+                advance(parser);
+            }
         }
 
-        then_stmt = block_head;
+        // Create the IF statement with THEN and ELSE blocks
         ASTStmt *stmt = ast_stmt_create(STMT_IF);
         ast_stmt_add_expr(stmt, condition);
-        ast_stmt_set_body(stmt, then_stmt);
+        ast_stmt_set_body(stmt, then_block_head);
         stmt->else_body = else_block_head;
         return stmt;
     }
@@ -3051,7 +3157,66 @@ static ASTExpr *parse_unary_expr(Parser *parser)
         return expr;
     }
 
-    return parse_primary_expr(parser);
+    return parse_member_expr(parser);
+}
+
+static ASTExpr *parse_member_expr(Parser *parser)
+{
+    ASTExpr *left = parse_primary_expr(parser);
+    if (!left)
+        return NULL;
+
+    /* Handle member access (dot notation): obj.member or obj.method() */
+    while (current_token(parser) && current_token(parser)->type == TOK_DOT)
+    {
+        advance(parser); /* consume DOT */
+
+        Token *member_tok = current_token(parser);
+        if (!member_tok || member_tok->type != TOK_IDENTIFIER)
+        {
+            parser_error(parser, "Expected member name after '.'");
+            ast_expr_free(left);
+            return NULL;
+        }
+
+        char *member_name = xstrdup(member_tok->value);
+        advance(parser);
+
+        /* Check for method call: obj.Method(...) */
+        if (match(parser, TOK_LPAREN))
+        {
+            ASTExpr *method_expr = ast_expr_create(EXPR_MEMBER_ACCESS);
+            method_expr->member_obj = left;
+            method_expr->member_name = member_name;
+
+            /* Parse method arguments */
+            while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
+            {
+                ASTExpr *arg = parse_expression(parser);
+                if (arg)
+                {
+                    ast_expr_add_child(method_expr, arg);
+                }
+                if (!match(parser, TOK_COMMA))
+                {
+                    break;
+                }
+            }
+
+            expect(parser, TOK_RPAREN, "Expected ')' after method arguments");
+            left = method_expr;
+        }
+        else
+        {
+            /* Simple member access: obj.field */
+            ASTExpr *member_expr = ast_expr_create(EXPR_MEMBER_ACCESS);
+            member_expr->member_obj = left;
+            member_expr->member_name = member_name;
+            left = member_expr;
+        }
+    }
+
+    return left;
 }
 
 static ASTExpr *parse_primary_expr(Parser *parser)
@@ -3087,15 +3252,15 @@ static ASTExpr *parse_primary_expr(Parser *parser)
         char *name = xstrdup(tok->value);
         advance(parser);
 
-        /* Check for function call or array access */
+        /* Check for function call or array access or procedure call */
         if (match(parser, TOK_LPAREN))
         {
-            /* User-defined functions start with FN, or it's a builtin */
-            int is_function = is_builtin_function(name) ||
-                              (name && strlen(name) >= 2 && strncasecmp(name, "FN", 2) == 0);
+            int is_builtin = is_builtin_function(name);
+            int is_user_function = (name && strlen(name) >= 2 && strncasecmp(name, "FN", 2) == 0);
 
-            if (is_function)
+            if (is_builtin || is_user_function)
             {
+                /* Built-in function or user-defined FN function */
                 ASTExpr *expr = ast_expr_create(EXPR_FUNC_CALL);
                 expr->var_name = name;
 
@@ -3118,15 +3283,20 @@ static ASTExpr *parse_primary_expr(Parser *parser)
             }
             else
             {
-                ASTExpr *expr = ast_expr_create(EXPR_ARRAY);
+                /* Could be a procedure call or array access
+                 * In expression context, we treat it as a potential procedure call
+                 * At evaluation time, it will check if it's actually a procedure
+                 */
+                ASTExpr *expr = ast_expr_create(EXPR_PROC_CALL);
                 expr->var_name = name;
 
+                /* Parse arguments */
                 while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
                 {
-                    ASTExpr *idx = parse_expression(parser);
-                    if (idx)
+                    ASTExpr *arg = parse_expression(parser);
+                    if (arg)
                     {
-                        ast_expr_add_child(expr, idx);
+                        ast_expr_add_child(expr, arg);
                     }
                     if (!match(parser, TOK_COMMA))
                     {
@@ -3134,7 +3304,7 @@ static ASTExpr *parse_primary_expr(Parser *parser)
                     }
                 }
 
-                expect(parser, TOK_RPAREN, "Expected ')' after array indices");
+                expect(parser, TOK_RPAREN, "Expected ')' after procedure arguments");
                 return expr;
             }
         }
@@ -3149,6 +3319,48 @@ static ASTExpr *parse_primary_expr(Parser *parser)
 
         ASTExpr *expr = ast_expr_create(EXPR_VAR);
         expr->var_name = name;
+        return expr;
+    }
+
+    /* NEW ClassName(...) - object instantiation */
+    if (tok->type == TOK_NEW)
+    {
+        advance(parser); /* consume NEW */
+
+        Token *class_tok = current_token(parser);
+        if (!class_tok || class_tok->type != TOK_IDENTIFIER)
+        {
+            parser_error(parser, "Expected class name after NEW");
+            return NULL;
+        }
+
+        char *class_name = xstrdup(class_tok->value);
+        advance(parser);
+
+        if (!expect(parser, TOK_LPAREN, "Expected '(' after class name"))
+        {
+            free(class_name);
+            return NULL;
+        }
+
+        ASTExpr *expr = ast_expr_create(EXPR_NEW);
+        expr->var_name = class_name;
+
+        /* Parse constructor arguments */
+        while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
+        {
+            ASTExpr *arg = parse_expression(parser);
+            if (arg)
+            {
+                ast_expr_add_child(expr, arg);
+            }
+            if (!match(parser, TOK_COMMA))
+            {
+                break;
+            }
+        }
+
+        expect(parser, TOK_RPAREN, "Expected ')' after constructor arguments");
         return expr;
     }
 

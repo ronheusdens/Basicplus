@@ -1,0 +1,45 @@
+REM Test procedure return value expressions
+REM This tests the new feature of using procedure calls as expressions
+
+PROCEDURE Add(X, Y)
+    LET result = X + Y
+    RETURN result
+END PROCEDURE
+
+PROCEDURE Factor(N)
+    REM Calculate factorial
+    IF N <= 1 THEN
+        RETURN 1
+    ELSE
+        RETURN N * Factor(N - 1)
+    ENDIF
+END PROCEDURE
+
+REM Test 1: Assign procedure call result to variable
+LET A = Add(3, 5)
+PRINT "Test 1 - Add(3, 5) =", A
+
+REM Test 2: Use procedure call in expression
+LET B = Add(10, 20) * 2
+PRINT "Test 2 - Add(10, 20) * 2 =", B
+
+REM Test 3: Use procedure call in IF condition
+IF Add(2, 3) > 4 THEN
+    PRINT "Test 3 - PASSED: 2 + 3 = 5, which is > 4"
+ELSE
+    PRINT "Test 3 - FAILED"
+ENDIF
+
+REM Test 4: Use procedure call in PRINT directly
+PRINT "Test 4 - Add(7, 8) =", Add(7, 8)
+
+REM Test 5: Nested procedure calls (factorial of 5)
+LET C = Factor(5)
+PRINT "Test 5 - Factor(5) =", C
+
+REM Test 6: Procedure call in FOR loop
+FOR I = 1 TO 3
+    PRINT "Test 6 - Iteration ", I, ": Add(1, ", I, ") =", Add(1, I)
+NEXT I
+
+END

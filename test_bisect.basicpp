@@ -1,0 +1,21 @@
+PROCEDURE CalcFunc(X)
+    LET result = X^5 + 2*X^3 - 1
+    RETURN result
+END PROCEDURE
+
+READ N
+LET A = 0
+LET B = 1
+LET X = 0.5
+FOR I = 1 TO N
+    LET R = CalcFunc(X)
+    IF R > 0 THEN
+        LET B = X
+    ELSE
+        LET A = X
+    ENDIF
+    LET X = (A+B)/2
+NEXT I
+PRINT "Final X:", X
+DATA 20
+END

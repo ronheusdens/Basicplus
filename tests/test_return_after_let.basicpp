@@ -1,0 +1,10 @@
+CLASS Test(X)
+    PROCEDURE ModifyAndReturn()
+        LET X = X + 1
+        RETURN X
+    END PROCEDURE
+END CLASS
+
+LET T = NEW Test(5)
+PRINT T.ModifyAndReturn()
+END

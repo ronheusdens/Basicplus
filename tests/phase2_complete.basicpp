@@ -1,0 +1,51 @@
+REM Phase 2 OOP Complete Feature Test
+REM Tests: classes, constructors, methods, instance variables, return values
+
+CLASS Counter(Value)
+    PROCEDURE Increment()
+        LET Value = Value + 1
+    END PROCEDURE
+    
+    PROCEDURE Decrement()
+        LET Value = Value - 1
+    END PROCEDURE
+    
+    PROCEDURE GetValue()
+        RETURN Value
+    END PROCEDURE
+    
+    PROCEDURE SetValue(NewValue)
+        LET Value = NewValue
+    END PROCEDURE
+END CLASS
+
+PRINT "Creating counters..."
+LET C1 = NEW Counter(10)
+LET C2 = NEW Counter(20)
+
+PRINT "C1 initial value: "; C1.GetValue()
+PRINT "C2 initial value: "; C2.GetValue()
+
+PRINT ""
+PRINT "Incrementing C1..."
+C1.Increment()
+C1.Increment()
+C1.Increment()
+PRINT "C1 after +3: "; C1.GetValue()
+
+PRINT ""
+PRINT "Decrementing C2..."
+C2.Decrement()
+PRINT "C2 after -1: "; C2.GetValue()
+
+PRINT ""
+PRINT "Setting C1 to 100..."
+C1.SetValue(100)
+PRINT "C1 new value: "; C1.GetValue()
+
+PRINT ""
+PRINT "Final state:"
+PRINT "C1 = "; C1.GetValue()
+PRINT "C2 = "; C2.GetValue()
+
+END

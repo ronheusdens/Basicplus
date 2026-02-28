@@ -1,0 +1,41 @@
+CLASS Counter(Count)
+    PROCEDURE Increment()
+        LET Count = Count + 1
+        RETURN Count
+    END PROCEDURE
+    
+    PROCEDURE Decrement()
+        LET Count = Count - 1
+        RETURN Count
+    END PROCEDURE
+    
+    PROCEDURE Reset()
+        LET Count = 0
+        RETURN Count
+    END PROCEDURE
+    
+    PROCEDURE GetValue()
+        RETURN Count
+    END PROCEDURE
+END CLASS
+
+LET C1 = NEW Counter(0)
+LET C2 = NEW Counter(10)
+
+PRINT "Counter 1:"
+FOR I = 1 TO 5
+    PRINT "Count:"; C1.Increment()
+NEXT I
+
+PRINT ""
+PRINT "Counter 2:"
+FOR I = 1 TO 3
+    PRINT "Count:"; C2.Decrement()
+NEXT I
+
+PRINT ""
+PRINT "Reset Counter 1"
+C1.Reset()
+PRINT "Value:"; C1.GetValue()
+
+END

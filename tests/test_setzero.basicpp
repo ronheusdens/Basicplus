@@ -1,0 +1,20 @@
+CLASS Counter(Count)
+    PROCEDURE Increment()
+        LET Count = Count + 1
+        RETURN Count
+    END PROCEDURE
+    
+    PROCEDURE Decrement()
+        LET Count = Count - 1
+        RETURN Count
+    END PROCEDURE
+    
+    PROCEDURE SetZero()
+        LET Count = 0
+        RETURN Count
+    END PROCEDURE
+END CLASS
+
+LET C = NEW Counter(5)
+PRINT C.Increment()
+END

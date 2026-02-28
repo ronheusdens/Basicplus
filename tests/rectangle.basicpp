@@ -1,0 +1,44 @@
+CLASS Rectangle(Width, Height)
+    PROCEDURE Area()
+        RETURN Width * Height
+    END PROCEDURE
+    
+    PROCEDURE Perimeter()
+        RETURN 2 * (Width + Height)
+    END PROCEDURE
+    
+    PROCEDURE Diagonal()
+        RETURN SQR(Width * Width + Height * Height)
+    END PROCEDURE
+    
+    PROCEDURE Scale(Factor)
+        LET Width = Width * Factor
+        LET Height = Height * Factor
+    END PROCEDURE
+    
+    PROCEDURE PrintDimensions()
+        PRINT "Rectangle: "; Width; " x "; Height
+    END PROCEDURE
+END CLASS
+
+LET R1 = NEW Rectangle(5, 3)
+LET R2 = NEW Rectangle(10, 7)
+
+PRINT "R1 Details:"
+R1.PrintDimensions()
+PRINT "Area:"; R1.Area()
+PRINT "Perimeter:"; R1.Perimeter()
+PRINT "Diagonal:"; R1.Diagonal()
+
+PRINT ""
+PRINT "Scaling R1 by 2x"
+R1.Scale(2)
+R1.PrintDimensions()
+PRINT "New Area:"; R1.Area()
+
+PRINT ""
+PRINT "R2 Details:"
+R2.PrintDimensions()
+PRINT "Area:"; R2.Area()
+
+END

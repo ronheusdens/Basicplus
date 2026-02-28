@@ -1,0 +1,9 @@
+CLASS Point(X, Y)
+END CLASS
+
+PRINT "Creating instance..."
+LET P = NEW Point(3, 4)
+PRINT "After NEW, P = "; P
+PRINT "Type of P: "; P + 0
+
+END

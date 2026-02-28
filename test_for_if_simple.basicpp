@@ -1,0 +1,9 @@
+REM FOR + IF inside
+READ N
+FOR I = 1 TO 3
+    IF I > 0 THEN
+        PRINT I
+    ENDIF
+NEXT I
+DATA 5
+END

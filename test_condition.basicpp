@@ -1,0 +1,22 @@
+PROCEDURE Add(X, Y)
+    LET result = X + Y
+    RETURN result
+END PROCEDURE
+
+PRINT "Test 1: Assignment"
+LET A = Add(3, 5)
+PRINT A
+
+PRINT "Test 2: Arithmetic"
+LET B = Add(10, 20) * 2
+PRINT B
+
+PRINT "Test 3: Comparison"
+LET C = Add(2, 3)
+IF C > 4 THEN PRINT "Passed"
+IF C = 5 THEN PRINT "Correct value"
+
+PRINT "Test 4: Direct"
+PRINT Add(7, 8)
+
+END

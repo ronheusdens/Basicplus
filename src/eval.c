@@ -1,4 +1,5 @@
 #include "eval.h"
+#include "executor.h"
 #include "builtins.h"
 #include "errors.h"
 #include <string.h>
@@ -291,6 +292,127 @@ static double eval_expr_internal(RuntimeState *state, ASTExpr *expr)
         }
         return 0.0;
 
+    case EXPR_PROC_CALL:
+        /* Call user-defined procedure and return its value */
+        if (expr->var_name && state)
+        {
+            /* Need to have ExecutionContext available (set during execution) */
+            void *ctx_ptr = runtime_get_execution_context(state);
+            if (ctx_ptr)
+            {
+                ExecutionContext *ctx = (ExecutionContext *)ctx_ptr;
+                return executor_execute_procedure_expr(ctx, expr->var_name,
+                                                       expr->children, expr->num_children);
+            }
+        }
+        return 0.0;
+
+    case EXPR_MEMBER_ACCESS:
+        /* obj.method(...) or obj.field - member access */
+        if (expr->member_obj && expr->member_name && state)
+        {
+            /* Evaluate member_obj to get instance ID */
+            double obj_id_val = ast_eval_expr(expr->member_obj);
+            int obj_id = (int)obj_id_val;
+
+            void *ctx_ptr = runtime_get_execution_context(state);
+            if (ctx_ptr)
+            {
+                ExecutionContext *ctx = (ExecutionContext *)ctx_ptr;
+                ObjectInstance *instance = runtime_get_instance(ctx->runtime, obj_id);
+
+                if (instance)
+                {
+                    /* Check if this is a method call (has children = arguments) */
+                    if (expr->num_children >= 0) /* Method call (0 or more args) */
+                    {
+                        ClassDef *class_def = runtime_lookup_class(ctx->runtime, instance->class_name);
+                        if (class_def)
+                        {
+                            /* Prepend object as first argument for method call */
+                            ASTExpr **method_args = xmalloc(sizeof(ASTExpr *) * (expr->num_children + 1));
+                            method_args[0] = expr->member_obj; /* Object is first arg */
+                            for (int i = 0; i < expr->num_children; i++)
+                            {
+                                method_args[i + 1] = expr->children[i];
+                            }
+
+                            double result = executor_execute_procedure_expr(ctx, expr->member_name,
+                                                                            method_args, expr->num_children + 1);
+                            free(method_args);
+                            return result;
+                        }
+                    }
+                    else
+                    {
+                        /* Field access */
+                        return runtime_get_instance_variable(instance, expr->member_name);
+                    }
+                }
+            }
+        }
+        return 0.0;
+
+    case EXPR_NEW:
+        /* NEW ClassName(...) - create new instance */
+        if (getenv("AST_DEBUG"))
+        {
+            fprintf(stderr, "[EVAL] EXPR_NEW: var_name=%s, state=%p\n",
+                    expr->var_name ? expr->var_name : "NULL", (void *)state);
+        }
+        if (expr->var_name && state)
+        {
+            void *ctx_ptr = runtime_get_execution_context(state);
+            if (getenv("AST_DEBUG"))
+            {
+                fprintf(stderr, "[EVAL] EXPR_NEW: ctx_ptr=%p\n", ctx_ptr);
+            }
+            if (ctx_ptr)
+            {
+                ExecutionContext *ctx = (ExecutionContext *)ctx_ptr;
+                ObjectInstance *inst = runtime_create_instance(ctx->runtime, expr->var_name);
+                if (inst)
+                {
+                    /* Bind constructor arguments to instance variables */
+                    ClassDef *class_def = runtime_lookup_class(ctx->runtime, expr->var_name);
+                    if (class_def && class_def->parameters)
+                    {
+                        ASTParameterList *params = (ASTParameterList *)class_def->parameters;
+                        /* Bind each constructor argument to parameter name */
+                        for (int i = 0; i < params->num_params && i < expr->num_children; i++)
+                        {
+                            ASTParameter *param = params->params[i];
+                            ASTExpr *arg = expr->children[i];
+                            if (param && arg && param->name)
+                            {
+                                double arg_value = ast_eval_expr(arg);
+                                runtime_set_instance_variable(inst, param->name, arg_value);
+                                if (getenv("AST_DEBUG"))
+                                {
+                                    fprintf(stderr, "[NEW] Bound %s = %g\n", param->name, arg_value);
+                                }
+                            }
+                        }
+                    }
+
+                    if (getenv("AST_DEBUG"))
+                    {
+                        fprintf(stderr, "[NEW] Created instance of %s with ID %d\n",
+                                expr->var_name, inst->instance_id);
+                    }
+                    return (double)inst->instance_id;
+                }
+                else
+                {
+                    if (getenv("AST_DEBUG"))
+                    {
+                        fprintf(stderr, "[NEW] Failed to create instance of %s\n", expr->var_name);
+                    }
+                }
+            }
+        }
+        return 0.0;
+
     default:
         return 0.0;
     }
@@ -330,6 +452,26 @@ static char *eval_string_expr_internal(RuntimeState *state, ASTExpr *expr)
         if (expr->var_name)
         {
             return call_string_function(state, expr->var_name, expr->children, expr->num_children);
+        }
+        return xstrdup("");
+
+    case EXPR_PROC_CALL:
+        /* Call procedure that returns numeric value, convert to string */
+        if (expr->var_name && state)
+        {
+            void *ctx_ptr = runtime_get_execution_context(state);
+            if (ctx_ptr)
+            {
+                ExecutionContext *ctx = (ExecutionContext *)ctx_ptr;
+                double result = executor_execute_procedure_expr(ctx, expr->var_name,
+                                                                expr->children, expr->num_children);
+                char buf[64];
+                if (fabs(result) < 1e-10 && result != 0.0)
+                    snprintf(buf, sizeof(buf), "%.9e", result);
+                else
+                    snprintf(buf, sizeof(buf), "%.15g", result);
+                return xstrdup(buf);
+            }
         }
         return xstrdup("");
 
