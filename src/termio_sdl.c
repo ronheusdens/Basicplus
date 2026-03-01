@@ -612,6 +612,11 @@ void termio_present(void)
             /* Monokai Pro comment grey #72696a — solid */
             SDL_SetRenderDrawColor(g_renderer, 114, 105, 106, 255);
 
+            /* Vertical guide at column 0 of code (under first char of parent line) */
+            int x0 = gutter * g_char_width + g_char_width / 2;
+            SDL_RenderDrawLine(g_renderer, x0, row * g_char_height,
+                               x0, (row + 1) * g_char_height - 1);
+
             /* 2×2 dot centred in each indented column (skip tab-stop columns) */
             for (int j = 1; j <= code_indent; j++)
             {

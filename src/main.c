@@ -29,7 +29,7 @@ typedef struct
 
 static const VersionInfo g_version_info = {
     "Basic++ Interpreter",
-    "Version 0.3.1",
+    "Version 0.3.2",
     __DATE__ " " __TIME__};
 
 typedef struct
