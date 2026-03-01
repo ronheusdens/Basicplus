@@ -1,9 +1,0 @@
-PROCEDURE Calc(X)
-    RETURN X * 2
-END PROCEDURE
-
-READ N
-PRINT "Read N:", N
-PRINT "Calc(5):", Calc(5)
-DATA 7
-END

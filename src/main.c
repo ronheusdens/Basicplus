@@ -29,12 +29,11 @@ typedef struct
 
 static const VersionInfo g_version_info = {
     "Basic++ Interpreter",
-    "Version 0.2.0",
+    "Version 0.2.3",
     __DATE__ " " __TIME__};
 
 typedef struct
 {
-    int line_number;
     char *text;
 } StoredLine;
 
@@ -47,54 +46,14 @@ static void handle_sigint(int sig)
     g_interrupt = 1;
 }
 
-static int find_line_index(StoredLine *lines, int count, int line_number)
+static void append_line(StoredLine **lines, int *count, int *cap, const char *text)
 {
-    int lo = 0, hi = count;
-    while (lo < hi)
-    {
-        int mid = (lo + hi) / 2;
-        if (lines[mid].line_number < line_number)
-            lo = mid + 1;
-        else
-            hi = mid;
-    }
-    if (lo < count && lines[lo].line_number == line_number)
-        return lo;
-    return -lo - 1;
-}
-
-static void insert_line(StoredLine **lines, int *count, int *cap, int line_number, const char *text)
-{
-    if (text == NULL || *text == '\0')
-    {
-        int idx = find_line_index(*lines, *count, line_number);
-        if (idx >= 0)
-        {
-            free((*lines)[idx].text);
-            memmove(&(*lines)[idx], &(*lines)[idx + 1], (size_t)(*count - idx - 1) * sizeof(StoredLine));
-            (*count)--;
-        }
-        return;
-    }
-
-    int idx = find_line_index(*lines, *count, line_number);
-    if (idx >= 0)
-    {
-        free((*lines)[idx].text);
-        (*lines)[idx].text = xstrdup(text);
-        return;
-    }
-
-    idx = -idx - 1;
     if (*count >= *cap)
     {
         *cap = (*cap == 0) ? 32 : (*cap * 2);
         *lines = xrealloc(*lines, (size_t)(*cap) * sizeof(StoredLine));
     }
-
-    memmove(&(*lines)[idx + 1], &(*lines)[idx], (size_t)(*count - idx) * sizeof(StoredLine));
-    (*lines)[idx].line_number = line_number;
-    (*lines)[idx].text = xstrdup(text);
+    (*lines)[*count].text = xstrdup(text);
     (*count)++;
 }
 
@@ -110,203 +69,11 @@ static void clear_program(StoredLine **lines, int *count, int *cap)
     *cap = 0;
 }
 
-/* Check if word at p matches keyword (case-insensitive). p points to start of word. */
-static int match_keyword(const char *p, const char *end, const char *kw)
-{
-    size_t len = strlen(kw);
-    if ((size_t)(end - p) < len)
-        return 0;
-    if (strncasecmp(p, kw, len) != 0)
-        return 0;
-    if ((size_t)(end - p) > len && (isalnum((unsigned char)p[len]) || p[len] == '$'))
-        return 0;
-    return 1;
-}
-
-/* Replace line number refs (GOTO, GOSUB, THEN, RESTORE, ON...GOTO/GOSUB) using map. */
-static char *replace_all_line_refs(const char *text, const int *map, int max_old)
-{
-    size_t text_len = strlen(text);
-    size_t out_cap = text_len + 128;
-    char *out = xmalloc(out_cap);
-    size_t out_pos = 0;
-    int in_line_ref_context = 0; /* 1=expect line num after GOTO/GOSUB/THEN/RESTORE, 2=in ON..GOTO list */
-
-    for (size_t i = 0; i < text_len;)
-    {
-        if (isdigit((unsigned char)text[i]))
-        {
-            size_t j = i;
-            int val = 0;
-            while (j < text_len && isdigit((unsigned char)text[j]))
-            {
-                val = val * 10 + (text[j] - '0');
-                j++;
-            }
-            int new_val = val;
-            if (in_line_ref_context && val <= max_old && map[val] >= 0)
-                new_val = map[val];
-            if (in_line_ref_context)
-                in_line_ref_context = (in_line_ref_context == 2) ? 2 : 0; /* Stay in 2 for next num */
-            char buf[16];
-            snprintf(buf, sizeof(buf), "%d", new_val);
-            size_t buf_len = strlen(buf);
-            if (out_pos + buf_len >= out_cap)
-            {
-                out_cap *= 2;
-                out = xrealloc(out, out_cap);
-            }
-            memcpy(out + out_pos, buf, buf_len + 1);
-            out_pos += buf_len;
-            i = j;
-        }
-        else if (isalpha((unsigned char)text[i]) || text[i] == '_')
-        {
-            size_t start = i;
-            while (i < text_len && (isalnum((unsigned char)text[i]) || text[i] == '$' || text[i] == '_'))
-                i++;
-            const char *word_end = text + i;
-            if (match_keyword(text + start, word_end, "GOTO") ||
-                match_keyword(text + start, word_end, "GOSUB"))
-            {
-                in_line_ref_context = 2; /* Single or comma-separated list */
-            }
-            else if (match_keyword(text + start, word_end, "THEN") ||
-                     match_keyword(text + start, word_end, "RESTORE"))
-            {
-                in_line_ref_context = 1; /* Single line number */
-            }
-            while (out_pos + (i - start) >= out_cap)
-            {
-                out_cap *= 2;
-                out = xrealloc(out, out_cap);
-            }
-            memcpy(out + out_pos, text + start, i - start);
-            out_pos += i - start;
-        }
-        else
-        {
-            if (text[i] != ',' && text[i] != ' ' && text[i] != '\t' && in_line_ref_context == 1)
-                in_line_ref_context = 0;
-            if (out_pos + 1 >= out_cap)
-            {
-                out_cap *= 2;
-                out = xrealloc(out, out_cap);
-            }
-            out[out_pos++] = text[i++];
-        }
-    }
-    out[out_pos] = '\0';
-    return out;
-}
-
-/* RENUM [start] [, increment]. Defaults: start=10, increment=10. */
-static int do_renum(StoredLine **lines, int *count, int *cap, int start, int increment)
-{
-    (void)cap;
-    if (*count == 0)
-    {
-        termio_write("?NO PROGRAM\n");
-        return -1;
-    }
-    if (start < 1 || increment < 1)
-    {
-        termio_write("?ILLEGAL FUNCTION CALL\n");
-        return -1;
-    }
-
-    /* Build old_line -> new_line mapping (by order in lines array) */
-    int *old_to_new = xmalloc((size_t)(*count) * sizeof(int));
-    int max_old = 0;
-    for (int i = 0; i < *count; i++)
-    {
-        int old = (*lines)[i].line_number;
-        if (old > max_old)
-            max_old = old;
-        int new_num = start + i * increment;
-        if (new_num > 65535)
-        {
-            free(old_to_new);
-            termio_write("?OVERFLOW\n");
-            return -1;
-        }
-        old_to_new[i] = new_num;
-    }
-
-    int *map = xmalloc((size_t)(max_old + 1) * sizeof(int));
-    for (int i = 0; i <= max_old; i++)
-        map[i] = -1;
-    for (int i = 0; i < *count; i++)
-        map[(*lines)[i].line_number] = old_to_new[i];
-
-    /* Replace line refs in each line's text */
-    for (int i = 0; i < *count; i++)
-    {
-        char *old_text = (*lines)[i].text;
-        if (!old_text)
-            continue;
-        char *new_text = replace_all_line_refs(old_text, map, max_old);
-        free(old_text);
-        (*lines)[i].text = new_text;
-    }
-
-    /* Update line_number for each line */
-    for (int i = 0; i < *count; i++)
-        (*lines)[i].line_number = old_to_new[i];
-
-    free(map);
-    free(old_to_new);
-    termio_write("OK\n");
-    return 0;
-}
-
-/* Enter LINE EDIT mode for a specific line number */
-static void edit_line(StoredLine **lines, int *count, int *cap, int line_num)
-{
-    (void)cap; /* Unused parameter */
-    /* Find the line to edit */
-    int edit_idx = -1;
-    for (int i = 0; i < *count; i++)
-    {
-        if ((*lines)[i].line_number == line_num)
-        {
-            edit_idx = i;
-            break;
-        }
-    }
-
-    if (edit_idx < 0)
-    {
-        printf("?LINE NOT FOUND\n");
-        return;
-    }
-
-    char edit_buf[1024];
-    strncpy(edit_buf, (*lines)[edit_idx].text, sizeof(edit_buf) - 1);
-    edit_buf[sizeof(edit_buf) - 1] = '\0';
-
-    /* Use termio_lineedit for full editing capability */
-    int len = termio_lineedit(line_num, edit_buf, sizeof(edit_buf));
-
-    if (len >= 0)
-    {
-        /* Update the line in storage */
-        free((*lines)[edit_idx].text);
-        (*lines)[edit_idx].text = (char *)malloc(strlen(edit_buf) + 1);
-        strcpy((*lines)[edit_idx].text, edit_buf);
-        printf("OK\n");
-    }
-    else
-    {
-        printf("EDIT CANCELLED\n");
-    }
-}
-
 static void list_program(StoredLine *lines, int count)
 {
     for (int i = 0; i < count; i++)
     {
-        termio_printf("%d %s\n", lines[i].line_number, lines[i].text ? lines[i].text : "");
+        termio_printf("%s\n", lines[i].text ? lines[i].text : "");
     }
 }
 
@@ -314,17 +81,12 @@ static char *build_program_text(StoredLine *lines, int count)
 {
     size_t total = 0;
     for (int i = 0; i < count; i++)
-    {
-        total += 16 + (lines[i].text ? strlen(lines[i].text) : 0) + 2;
-    }
+        total += (lines[i].text ? strlen(lines[i].text) : 0) + 1;
 
     char *buf = xmalloc(total + 1);
     buf[0] = '\0';
     for (int i = 0; i < count; i++)
     {
-        char linebuf[32];
-        snprintf(linebuf, sizeof(linebuf), "%d ", lines[i].line_number);
-        strcat(buf, linebuf);
         if (lines[i].text)
             strcat(buf, lines[i].text);
         strcat(buf, "\n");
@@ -424,14 +186,23 @@ static int load_program_file(StoredLine **lines, int *count, int *cap, const cha
         if (*p == '\0' || *p == '!')
             continue;
 
-        if (!isdigit((unsigned char)*p))
+        /* Strip leading line number if present (backward compatibility) */
+        if (isdigit((unsigned char)*p))
+        {
+            char *after;
+            strtol(p, &after, 10);
+            if (after != p && isspace((unsigned char)*after))
+            {
+                p = after;
+                while (*p && isspace((unsigned char)*p))
+                    p++;
+            }
+        }
+
+        if (*p == '\0')
             continue;
 
-        int line_num = (int)strtol(p, &p, 10);
-        while (*p && isspace((unsigned char)*p))
-            p++;
-
-        insert_line(lines, count, cap, line_num, p);
+        append_line(lines, count, cap, p);
     }
 
     fclose(fp);
@@ -499,7 +270,7 @@ static int save_program_file(StoredLine *lines, int count, const char *filename)
 
     for (int i = 0; i < count; i++)
     {
-        if (fprintf(fp, "%d %s\n", lines[i].line_number, lines[i].text ? lines[i].text : "") < 0)
+        if (fprintf(fp, "%s\n", lines[i].text ? lines[i].text : "") < 0)
         {
             termio_write("?SAVE ERROR: Write failed\n");
             fclose(fp);
@@ -533,149 +304,16 @@ static int save_callback(const char *filename)
 /* Global delete context for DELETE statement in programs */
 static int delete_callback(int start_line, int end_line)
 {
-    /* Validate line numbers */
-    int start_idx = find_line_index(g_save_lines, g_save_line_count, start_line);
-    int end_idx = find_line_index(g_save_lines, g_save_line_count, end_line);
-
-    /* The end line must exist */
-    if (end_idx < 0)
-    {
-        return -1; /* Line not found */
-    }
-
-    /* If start_line is greater than first line, we need to find it */
-    if (start_idx < 0)
-    {
-        /* Find the insertion point and scan forward from there */
-        int insert_idx = -start_idx - 1;
-        if (insert_idx >= g_save_line_count || g_save_lines[insert_idx].line_number > end_line)
-        {
-            return -1; /* No lines in range */
-        }
-        start_idx = insert_idx;
-    }
-
-    end_idx = find_line_index(g_save_lines, g_save_line_count, end_line);
-    if (end_idx < 0)
-    {
-        return -1;
-    }
-
-    /* Delete lines from start_idx to end_idx (inclusive) */
-    int num_to_delete = end_idx - start_idx + 1;
-    for (int i = 0; i < num_to_delete; i++)
-    {
-        if (start_idx < g_save_line_count)
-        {
-            free(g_save_lines[start_idx].text);
-            memmove(&g_save_lines[start_idx], &g_save_lines[start_idx + 1],
-                    (size_t)(g_save_line_count - start_idx - 1) * sizeof(StoredLine));
-            g_save_line_count--;
-        }
-    }
-
+    /* Line-number based DELETE no longer supported */
+    (void)start_line;
+    (void)end_line;
     return 0;
 }
 
 static int merge_callback(const char *filename)
 {
-    if (!filename)
-    {
-        return -1;
-    }
-
-    /* Read file */
-    FILE *fp = fopen(filename, "r");
-    if (!fp)
-    {
-        termio_printf("?FILE NOT FOUND\n");
-        return -1;
-    }
-
-    char line_buf[1024];
-    while (fgets(line_buf, sizeof(line_buf), fp))
-    {
-        /* Remove trailing newline */
-        size_t len = strlen(line_buf);
-        if (len > 0 && line_buf[len - 1] == '\n')
-        {
-            line_buf[len - 1] = '\0';
-        }
-
-        if (strlen(line_buf) == 0)
-        {
-            continue; /* Skip empty lines */
-        }
-
-        /* Parse line number */
-        char *p = line_buf;
-        while (*p && isspace((unsigned char)*p))
-            p++;
-
-        if (!isdigit((unsigned char)*p))
-        {
-            termio_printf("?SYNTAX ERROR IN MERGE FILE\n");
-            fclose(fp);
-            return -1;
-        }
-
-        int line_num = 0;
-        while (*p && isdigit((unsigned char)*p))
-        {
-            line_num = line_num * 10 + (*p - '0');
-            p++;
-        }
-
-        /* Find existing line */
-        int idx = find_line_index(g_save_lines, g_save_line_count, line_num);
-        if (idx >= 0)
-        {
-            /* Line exists - overwrite it */
-            termio_printf("MERGE: line %d overwritten\n", line_num);
-            free(g_save_lines[idx].text);
-            g_save_lines[idx].text = xstrdup(line_buf);
-        }
-        else
-        {
-            /* Line doesn't exist - add it */
-            if (g_save_line_count >= g_save_lines_cap)
-            {
-                g_save_lines_cap = (g_save_lines_cap > 0) ? g_save_lines_cap * 2 : 256;
-                g_save_lines = xrealloc(g_save_lines, (size_t)g_save_lines_cap * sizeof(StoredLine));
-            }
-
-            int insert_idx = -idx - 1;
-
-            /* Shift lines to make room */
-            if (insert_idx < g_save_line_count)
-            {
-                memmove(&g_save_lines[insert_idx + 1], &g_save_lines[insert_idx],
-                        (size_t)(g_save_line_count - insert_idx) * sizeof(StoredLine));
-            }
-
-            g_save_lines[insert_idx].line_number = line_num;
-            g_save_lines[insert_idx].text = xstrdup(line_buf);
-            g_save_line_count++;
-        }
-    }
-
-    fclose(fp);
-
-    /* Clear all variables and arrays (as per MERGE semantics) */
-    if (g_runtime)
-    {
-        runtime_clear_all(g_runtime);
-    }
-
-    /* Close all open files */
-    if (g_runtime)
-    {
-        for (int i = 0; i < 10; i++)
-        {
-            runtime_close_file(g_runtime, i + 1);
-        }
-    }
-
+    /* Line-number based MERGE no longer supported */
+    (void)filename;
     return 0;
 }
 
@@ -741,65 +379,32 @@ static int starts_with_keyword(const char *line, const char *keyword)
     return 0;
 }
 
-static int prompt_memory_size(void)
-{
-    char input[64];
-    int memory_size = 32768;
-
-    termio_write("MEMORY SIZE? ");
-
-    int len = termio_readline(input, sizeof(input));
-    if (len < 0)
-        return memory_size;
-
-    char *p = input;
-    while (*p && isspace((unsigned char)*p))
-        p++;
-
-    if (*p == '\0')
-        return memory_size;
-
-    char *end = NULL;
-    long value = strtol(p, &end, 10);
-    if (end != p && value > 0)
-    {
-        long bytes = value * 1024L;
-        if (bytes > 0)
-        {
-            memory_size = (int)bytes;
-        }
-    }
-
-    return memory_size;
-}
-
 static void run_interactive(void)
 {
     StoredLine *lines = NULL;
     int line_count = 0;
     int line_cap = 0;
-    int auto_mode = 0;
-    int auto_next = 10;
-    int auto_inc = 10;
 
-    if (!termio_init(80, 24, 1))
+    if (termio_init(80, 24, 1) < 0)
     {
-        fprintf(stderr, "Failed to initialize terminal window.\n");
-        return;
+        /* SDL2 failed, fall back to stdio mode */
+        printf("(c) 1978 Tandy Corporation\n");
+        fflush(stdout);
     }
-    termio_set_title("TRS-80 BASIC");
-
-    int memory_size = prompt_memory_size();
-    termio_write("RADIO SHACK LEVEL II BASIC\n");
+    else
+    {
+        /* SDL2 initialized, show welcome screen */
+        termio_show_welcome(g_version_info.name, g_version_info.version);
+    }
+    termio_set_title("Basic++");
 
     RuntimeState *runtime = runtime_create();
-    runtime_set_memory_size(runtime, memory_size);
+    runtime_set_memory_size(runtime, 32768); /* Default memory size */
     executor_set_interrupt_flag(&g_interrupt);
 
     signal(SIGINT, handle_sigint);
 
     char input[1024];
-    int copyright_shown = 0;
     while (1)
     {
         /* Check for interrupt at start of loop */
@@ -820,20 +425,8 @@ static void run_interactive(void)
             runtime_set_output_pending(runtime, 0);
         }
 
-        if (auto_mode)
-        {
-            termio_printf("%d ", auto_next);
-        }
-
-        else
-        {
-            if (!copyright_shown)
-            {
-                termio_write("(c) 1978 Tandy Corporation\n");
-                copyright_shown = 1;
-            }
-            termio_write("READY\n> ");
-        }
+        (void)runtime; /* suppress unused after potential future refactor */
+        termio_write("Ok ");
 
         termio_handle_events(); /* Handle any pending events (scrolling, etc.) */
 
@@ -851,6 +444,15 @@ static void run_interactive(void)
             continue;
         }
 
+        if (len == -2)
+        {
+            /* Ctrl-C in SDL readline */
+            termio_write("BREAK\n");
+            runtime_set_output_col(runtime, 0);
+            runtime_set_output_pending(runtime, 0);
+            continue;
+        }
+
         if (len < 0)
         {
             termio_write("\n");
@@ -862,24 +464,7 @@ static void run_interactive(void)
             p++;
 
         if (*p == '\0')
-        {
-            if (auto_mode)
-            {
-                auto_mode = 0;
-            }
             continue;
-        }
-
-        /* Check if this is an EDIT command from scrollback browse */
-        if (strncmp(p, "EDIT ", 5) == 0)
-        {
-            int edit_line_num = atoi(p + 5);
-            if (edit_line_num > 0)
-            {
-                edit_line(&lines, &line_count, &line_cap, edit_line_num);
-            }
-            continue;
-        }
 
         if (*p == '!')
         {
@@ -956,18 +541,7 @@ static void run_interactive(void)
 
         if (starts_with_keyword(p, "EDIT"))
         {
-            p += 4;
-            while (*p && isspace((unsigned char)*p))
-                p++;
-            if (isdigit((unsigned char)*p))
-            {
-                int line_num = atoi(p);
-                edit_line(&lines, &line_count, &line_cap, line_num);
-            }
-            else
-            {
-                printf("?SYNTAX ERROR\n");
-            }
+            termio_write("?EDIT not available - use LOAD/SAVE with your editor\n");
             continue;
         }
 
@@ -1015,38 +589,11 @@ static void run_interactive(void)
             continue;
         }
 
-        if (starts_with_keyword(p, "RENUM"))
-        {
-            char *q = p + 5;
-            while (*q == ' ' || *q == '\t')
-                q++;
-            int start = 10, increment = 10;
-            if (*q != '\0' && *q != '\n')
-            {
-                start = (int)strtol(q, &q, 10);
-                if (start < 1)
-                    start = 10;
-                while (*q == ' ' || *q == '\t')
-                    q++;
-                if (*q == ',')
-                {
-                    q++;
-                    while (*q == ' ' || *q == '\t')
-                        q++;
-                    increment = (int)strtol(q, &q, 10);
-                    if (increment < 1)
-                        increment = 10;
-                }
-            }
-            do_renum(&lines, &line_count, &line_cap, start, increment);
-            continue;
-        }
-
         if (starts_with_keyword(p, "CLEAR"))
         {
             runtime_free(runtime);
             runtime = runtime_create();
-            runtime_set_memory_size(runtime, memory_size);
+            runtime_set_memory_size(runtime, 32768); /* Default memory size */
             g_interrupt = 0;
             continue;
         }
@@ -1080,12 +627,9 @@ static void run_interactive(void)
                 continue;
             }
 
-            /* Parse optional line number argument */
+            /* Parse optional line number argument - no longer supported */
             int start_line_num = -1;
-            if (*rest != '\0' && isdigit((unsigned char)*rest))
-            {
-                start_line_num = atoi(rest);
-            }
+            (void)start_line_num;
 
             char *program_text = build_program_text(lines, line_count);
             runtime_free(runtime);
@@ -1112,12 +656,12 @@ static void run_interactive(void)
 
             if (g_loaded_program_dir[0] != '\0' && chdir(g_loaded_program_dir) == 0)
             {
-                run_program_text_from_line(runtime, program_text, start_line_num);
+                run_program_text(runtime, program_text);
                 chdir(saved_cwd); /* Restore original directory */
             }
             else
             {
-                run_program_text_from_line(runtime, program_text, start_line_num);
+                run_program_text(runtime, program_text);
             }
 
             free(program_text);
@@ -1131,65 +675,14 @@ static void run_interactive(void)
 
         if (strncasecmp(p, "AUTO", 4) == 0)
         {
-            char *q = p + 4;
-            if (*q == '\0' || isspace((unsigned char)*q) || isdigit((unsigned char)*q) || *q == ',')
-            {
-                p = q;
-                while (*p && isspace((unsigned char)*p))
-                    p++;
-
-                if (*p == '\0')
-                {
-                    auto_next = 10;
-                    auto_inc = 10;
-                    auto_mode = 1;
-                    continue;
-                }
-
-                auto_next = 10;
-                auto_inc = 10;
-
-                if (*p == ',')
-                {
-                    p++;
-                    auto_inc = (int)strtol(p, NULL, 10);
-                }
-                else if (*p != '\0')
-                {
-                    auto_next = (int)strtol(p, &p, 10);
-                    if (*p == ',')
-                    {
-                        p++;
-                        auto_inc = (int)strtol(p, NULL, 10);
-                    }
-                }
-
-                auto_mode = 1;
-                continue;
-            }
-        }
-
-        if (auto_mode && !isdigit((unsigned char)*p))
-        {
-            insert_line(&lines, &line_count, &line_cap, auto_next, p);
-            runtime_set_last_entered_line(runtime, auto_next);
-            auto_next += auto_inc;
-            continue;
-        }
-
-        if (isdigit((unsigned char)*p))
-        {
-            int line_num = (int)strtol(p, &p, 10);
-            while (*p && isspace((unsigned char)*p))
-                p++;
-            insert_line(&lines, &line_count, &line_cap, line_num, p);
-            runtime_set_last_entered_line(runtime, line_num);
+            /* AUTO mode removed - line numbers are no longer supported */
+            termio_write("?AUTO mode no longer available\n");
             continue;
         }
 
         {
-            char *temp = xmalloc(strlen(p) + 8);
-            sprintf(temp, "0 %s\n", p);
+            char *temp = xmalloc(strlen(p) + 2);
+            sprintf(temp, "%s\n", p);
             g_interrupt = 0;
             run_program_text(runtime, temp);
             free(temp);
@@ -1290,31 +783,19 @@ int main(int argc, char *argv[])
         }
     }
 
-    FILE *f = fopen(file_to_run, "r");
-    if (f == NULL)
+    /* Load file through StoredLine system so line numbers are auto-assigned
+     * consistently with the REPL path */
+    StoredLine *lines = NULL;
+    int line_count = 0;
+    int line_cap = 0;
+    if (load_program_file(&lines, &line_count, &line_cap, file_to_run) != 0)
     {
-        termio_printf("ERROR: Cannot open file '%s'\n", file_to_run);
-        termio_printf("fopen: %s\n", strerror(errno));
-        termio_printf("\nUsage: basicpp <filename.bas|filename.basicpp>\n");
         compat_free(g_compat_state);
         g_compat_state = NULL;
         return 1;
     }
 
-    fseek(f, 0, SEEK_END);
-    long size = ftell(f);
-    fseek(f, 0, SEEK_SET);
-
-    char *program_text = xmalloc(size + 1);
-    if (fread(program_text, 1, size, f) != (size_t)size)
-    {
-        termio_printf("Error reading file\n");
-        fclose(f);
-        free(program_text);
-        return 1;
-    }
-    fclose(f);
-    program_text[size] = '\0';
+    char *program_text = build_program_text(lines, line_count);
 
     Lexer *lexer = lexer_create(program_text);
     Token *tokens = lexer_tokenize(lexer);
@@ -1331,6 +812,7 @@ int main(int argc, char *argv[])
         }
         lexer_free(lexer);
         free(program_text);
+        clear_program(&lines, &line_count, &line_cap);
         return 0;
     }
 
@@ -1344,24 +826,18 @@ int main(int argc, char *argv[])
         lexer_free(lexer);
         ast_program_free(program);
         free(program_text);
+        clear_program(&lines, &line_count, &line_cap);
         return 1;
     }
 
     RuntimeState *runtime = runtime_create();
-
-    StoredLine *lines = NULL;
-    int line_count = 0;
-    int line_cap = 0;
-    if (load_program_file(&lines, &line_count, &line_cap, file_to_run) == 0)
-    {
-        g_save_lines = lines;
-        g_save_line_count = line_count;
-        g_save_lines_cap = line_cap;
-        g_runtime = runtime;
-        runtime_set_save_callback(runtime, save_callback);
-        runtime_set_delete_callback(runtime, delete_callback);
-        runtime_set_merge_callback(runtime, merge_callback);
-    }
+    g_save_lines = lines;
+    g_save_line_count = line_count;
+    g_save_lines_cap = line_cap;
+    g_runtime = runtime;
+    runtime_set_save_callback(runtime, save_callback);
+    runtime_set_delete_callback(runtime, delete_callback);
+    runtime_set_merge_callback(runtime, merge_callback);
 
     executor_set_interrupt_flag(&g_interrupt);
     signal(SIGINT, handle_sigint);

@@ -318,15 +318,7 @@ int ast_execute_stmt(ASTStmt *stmt)
         return 0;
     switch (stmt->type)
     {
-    case STMT_COLOR:
-    case STMT_PCOLOR:
-    case STMT_SET:
-    case STMT_RESET:
-    case STMT_LINE:
-    case STMT_CIRCLE:
-    case STMT_PAINT:
-    case STMT_SCREEN:
-        /* CoCo graphics statements - not supported in Basic++ */
+        /* No special cleanup needed */
         return 0;
     default:
         return 0;
@@ -435,22 +427,6 @@ const char *stmt_type_name(StmtType type)
         return "DEFDBL";
     case STMT_DEFSTR:
         return "DEFSTR";
-    case STMT_COLOR:
-        return "COLOR";
-    case STMT_PCOLOR:
-        return "PCOLOR";
-    case STMT_SET:
-        return "SET";
-    case STMT_RESET:
-        return "RESET";
-    case STMT_LINE:
-        return "LINE";
-    case STMT_CIRCLE:
-        return "CIRCLE";
-    case STMT_PAINT:
-        return "PAINT";
-    case STMT_SCREEN:
-        return "SCREEN";
     case STMT_STOP:
         return "STOP";
     case STMT_CONT:

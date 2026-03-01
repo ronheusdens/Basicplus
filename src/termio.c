@@ -179,3 +179,11 @@ void termio_set_colors(int fg, int bg)
         fflush(stdout);
     }
 }
+
+/* Stub: welcome screen not available in stdio backend */
+void termio_show_welcome(const char *name, const char *version)
+{
+    (void)name;
+    (void)version;
+    /* No-op in stdio mode */
+}

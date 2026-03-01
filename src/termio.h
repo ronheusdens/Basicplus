@@ -42,4 +42,7 @@ void termio_sound_harmonics(int base_freq, const int *harmonics, const double *i
 /* Set text colors: fg/bg are 0=black, 1=white */
 void termio_set_colors(int fg, int bg);
 
+/* Display welcome screen with version information (SDL2 only) */
+void termio_show_welcome(const char *name, const char *version);
+
 #endif /* TERMIO_H */

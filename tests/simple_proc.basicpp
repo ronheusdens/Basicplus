@@ -1,7 +1,0 @@
-PROCEDURE Hello()
-    PRINT "Hello"
-END PROCEDURE
-
-Hello()
-
-END

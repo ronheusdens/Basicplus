@@ -1,7 +1,0 @@
-CLASS Point(X, Y)
-END CLASS
-
-LET P = NEW Point(3, 4)
-PRINT "P ="; P
-
-END

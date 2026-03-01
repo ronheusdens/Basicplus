@@ -1,5 +1,0 @@
-REM Test 1: DATA before READ
-DATA 100
-READ X
-PRINT "Read X:", X
-END

@@ -158,6 +158,71 @@ static int expect(Parser *parser, TokenType type, const char *msg)
     return 0;
 }
 
+/*
+ * Context-sensitive parsing helper:
+ * Returns 1 if the token can be used as an identifier name (variable, class,
+ * procedure, parameter, member). In BasicPP, any keyword may be used as a
+ * user-defined name when the grammar context unambiguously expects a name.
+ * Structural tokens (operators, delimiters, literals) are excluded.
+ */
+static int is_identifier_token(Token *tok)
+{
+    if (!tok || !tok->value)
+        return 0;
+    if (tok->type == TOK_IDENTIFIER)
+        return 1;
+    /* Exclude tokens that can never be identifier names */
+    switch (tok->type)
+    {
+    case TOK_EOF:
+    case TOK_NUMBER:
+    case TOK_STRING:
+    case TOK_KEYWORD:
+    case TOK_PLUS:
+    case TOK_MINUS:
+    case TOK_STAR:
+    case TOK_SLASH:
+    case TOK_CARET:
+    case TOK_MOD:
+    case TOK_PERCENT:
+    case TOK_EQ:
+    case TOK_NE:
+    case TOK_LT:
+    case TOK_LE:
+    case TOK_GT:
+    case TOK_GE:
+    case TOK_AND:
+    case TOK_OR:
+    case TOK_NOT:
+    case TOK_LPAREN:
+    case TOK_RPAREN:
+    case TOK_LBRACKET:
+    case TOK_RBRACKET:
+    case TOK_COMMA:
+    case TOK_SEMICOLON:
+    case TOK_COLON:
+    case TOK_DOLLAR:
+    case TOK_HASH:
+    case TOK_AMPERSAND:
+    case TOK_AT:
+    case TOK_QUESTION:
+    case TOK_EQUAL:
+    case TOK_LESS:
+    case TOK_GREATER:
+    case TOK_LESSEQUAL:
+    case TOK_GREATEREQUAL:
+    case TOK_NOTEQUAL:
+    case TOK_DOT:
+    case TOK_NEWLINE:
+    case TOK_UNKNOWN:
+        return 0;
+    default:
+        /* All keyword tokens (PRINT, FOR, CLASS, WHILE, etc.) have .value set
+         * and are valid as identifier names in declaration/name contexts */
+        return 1;
+    }
+}
+
 static void parser_error(Parser *parser, const char *msg)
 {
     parser->error_code = 1;
@@ -273,7 +338,7 @@ static ASTParameterList *parse_parameter_list(Parser *parser)
     while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
     {
         Token *param_tok = current_token(parser);
-        if (param_tok->type != TOK_IDENTIFIER)
+        if (!is_identifier_token(param_tok))
         {
             parser_error(parser, "Expected parameter name");
             return list;
@@ -311,7 +376,7 @@ static ASTStmt *parse_procedure_def(Parser *parser)
     advance(parser); /* consume PROCEDURE */
 
     Token *name_tok = current_token(parser);
-    if (!name_tok || name_tok->type != TOK_IDENTIFIER)
+    if (!name_tok || !is_identifier_token(name_tok))
     {
         parser_error(parser, "Expected procedure name");
         return NULL;
@@ -423,7 +488,7 @@ static ASTStmt *parse_class_def(Parser *parser)
     advance(parser); /* consume CLASS */
 
     Token *name_tok = current_token(parser);
-    if (!name_tok || name_tok->type != TOK_IDENTIFIER)
+    if (!name_tok || !is_identifier_token(name_tok))
     {
         parser_error(parser, "Expected class name");
         return NULL;
@@ -843,8 +908,19 @@ ASTStmt *parse_statement(Parser *parser)
         advance(parser);
         return ast_stmt_create(STMT_REM); /* treat as comment/no-op */
     default:
+    {
+        /* Context-sensitive: a keyword token may be used as a user-defined
+         * identifier (variable assignment or procedure call) when followed by
+         * '=', '(', or '.' */
+        Token *ntok = peek_next_token(parser);
+        if (is_identifier_token(current_token(parser)) &&
+            ntok && (ntok->type == TOK_EQ || ntok->type == TOK_EQUAL || ntok->type == TOK_LPAREN || ntok->type == TOK_DOT))
+        {
+            return parse_let_stmt(parser);
+        }
         parser_error(parser, "Unknown statement");
         return NULL;
+    }
     }
 }
 
@@ -1352,7 +1428,7 @@ static ASTStmt *parse_line_input_stmt(Parser *parser)
     }
 
     Token *tok = current_token(parser);
-    if (tok && tok->type == TOK_IDENTIFIER)
+    if (tok && is_identifier_token(tok))
     {
         ASTExpr *var = ast_expr_create(EXPR_VAR);
         var->var_name = xstrdup(tok->value);
@@ -1379,7 +1455,7 @@ static ASTStmt *parse_let_stmt(Parser *parser)
     }
 
     Token *tok = current_token(parser);
-    if (!tok || tok->type != TOK_IDENTIFIER)
+    if (!tok || !is_identifier_token(tok))
     {
         parser_error(parser, "Expected variable name");
         return NULL;
@@ -1403,7 +1479,7 @@ static ASTStmt *parse_let_stmt(Parser *parser)
 
         advance(parser); /* consume . */
 
-        if (!current_token(parser) || current_token(parser)->type != TOK_IDENTIFIER)
+        if (!current_token(parser) || !is_identifier_token(current_token(parser)))
         {
             parser_error(parser, "Expected member name after '.'");
             free(var_name);
@@ -2116,7 +2192,7 @@ static ASTStmt *parse_for_stmt(Parser *parser)
     advance(parser); /* consume FOR */
 
     Token *tok = current_token(parser);
-    if (!tok || (tok->type != TOK_IDENTIFIER && tok->type != TOK_LOOP))
+    if (!tok || !is_identifier_token(tok))
     {
         parser_error(parser, "Expected variable after FOR");
         return NULL;
@@ -2189,7 +2265,7 @@ static ASTStmt *parse_next_stmt(Parser *parser)
     ASTStmt *stmt = ast_stmt_create(STMT_NEXT);
 
     Token *tok = current_token(parser);
-    while (tok && tok->type == TOK_IDENTIFIER)
+    while (tok && is_identifier_token(tok))
     {
         ASTExpr *var = ast_expr_create(EXPR_VAR);
         var->var_name = xstrdup(tok->value);
@@ -2220,7 +2296,7 @@ static ASTStmt *parse_dim_stmt(Parser *parser)
         }
 
         Token *tok = current_token(parser);
-        if (!tok || tok->type != TOK_IDENTIFIER)
+        if (!tok || !is_identifier_token(tok))
         {
             parser_error(parser, "Expected array name in DIM");
             break;
@@ -2271,7 +2347,7 @@ static ASTStmt *parse_read_stmt(Parser *parser)
         }
 
         Token *tok = current_token(parser);
-        if (!tok || tok->type != TOK_IDENTIFIER)
+        if (!tok || !is_identifier_token(tok))
         {
             parser_error(parser, "Expected variable in READ");
             break;
@@ -2870,7 +2946,7 @@ static ASTStmt *parse_def_fn_stmt(Parser *parser)
     while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
     {
         Token *param_tok = current_token(parser);
-        if (!param_tok || param_tok->type != TOK_IDENTIFIER)
+        if (!param_tok || !is_identifier_token(param_tok))
         {
             parser_error(parser, "Expected parameter name");
             return stmt;
@@ -3172,7 +3248,7 @@ static ASTExpr *parse_member_expr(Parser *parser)
         advance(parser); /* consume DOT */
 
         Token *member_tok = current_token(parser);
-        if (!member_tok || member_tok->type != TOK_IDENTIFIER)
+        if (!member_tok || !is_identifier_token(member_tok))
         {
             parser_error(parser, "Expected member name after '.'");
             ast_expr_free(left);
@@ -3328,7 +3404,7 @@ static ASTExpr *parse_primary_expr(Parser *parser)
         advance(parser); /* consume NEW */
 
         Token *class_tok = current_token(parser);
-        if (!class_tok || class_tok->type != TOK_IDENTIFIER)
+        if (!class_tok || !is_identifier_token(class_tok))
         {
             parser_error(parser, "Expected class name after NEW");
             return NULL;
@@ -3369,6 +3445,36 @@ static ASTExpr *parse_primary_expr(Parser *parser)
     {
         ASTExpr *expr = parse_expression(parser);
         expect(parser, TOK_RPAREN, "Expected ')' after expression");
+        return expr;
+    }
+
+    /* Context-sensitive fallback: a keyword token used as an identifier in
+     * expression context (e.g., a user procedure whose name is a keyword). */
+    if (is_identifier_token(tok))
+    {
+        char *name = xstrdup(tok->value);
+        advance(parser);
+
+        if (current_token(parser) && current_token(parser)->type == TOK_LPAREN)
+        {
+            advance(parser); /* consume ( */
+            ASTExpr *expr = ast_expr_create(EXPR_PROC_CALL);
+            expr->var_name = name;
+            while (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
+            {
+                ASTExpr *arg = parse_expression(parser);
+                if (arg)
+                    ast_expr_add_child(expr, arg);
+                if (!match(parser, TOK_COMMA))
+                    break;
+            }
+            expect(parser, TOK_RPAREN, "Expected ')' after procedure arguments");
+            return expr;
+        }
+
+        /* Simple keyword used as variable name */
+        ASTExpr *expr = ast_expr_create(EXPR_VAR);
+        expr->var_name = name;
         return expr;
     }
 
