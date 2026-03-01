@@ -10,7 +10,7 @@ UNAME_M := $(shell uname -m)
 CC := gcc
 
 # Common flags
-WFLAGS ?= -Wall -Wextra -Werror=implicit-function-declaration
+WFLAGS ?= -Wall -Wextra -Werror=implicit-function-declaration -Wno-unused-parameter
 CFLAGS_COMMON := -std=c99 $(WFLAGS) -O2 -g
 LDFLAGS_COMMON := -lm
 

@@ -3500,10 +3500,9 @@ double executor_execute_procedure_expr(ExecutionContext *ctx, const char *proc_n
     ctx->proc_return_flag = 0;
 
     /* Execute procedure body */
-    int result = 0;
     if (proc_def->body)
     {
-        result = execute_stmt_internal(ctx, proc_def->body);
+        execute_stmt_internal(ctx, proc_def->body);
     }
 
     /* Save return value before scope restoration */

@@ -1445,12 +1445,9 @@ static ASTStmt *parse_line_input_stmt(Parser *parser)
 
 static ASTStmt *parse_let_stmt(Parser *parser)
 {
-    int has_let_keyword = 0;
-
     /* Optional LET keyword */
     if (current_token(parser) && current_token(parser)->type == TOK_LET)
     {
-        has_let_keyword = 1;
         advance(parser);
     }
 
@@ -1602,8 +1599,6 @@ static ASTStmt *parse_let_stmt(Parser *parser)
     if (match(parser, TOK_LPAREN))
     {
         /* Could be array assignment: A(I) = value  OR  procedure call: CalcFunc(X) */
-        int arg_count = 0;
-
         /* Parse arguments */
         if (current_token(parser) && current_token(parser)->type != TOK_RPAREN)
         {
@@ -1611,7 +1606,6 @@ static ASTStmt *parse_let_stmt(Parser *parser)
             if (arg)
             {
                 ast_expr_add_child(lhs, arg);
-                arg_count++;
             }
 
             while (match(parser, TOK_COMMA))
@@ -1620,7 +1614,6 @@ static ASTStmt *parse_let_stmt(Parser *parser)
                 if (arg)
                 {
                     ast_expr_add_child(lhs, arg);
-                    arg_count++;
                 }
             }
         }

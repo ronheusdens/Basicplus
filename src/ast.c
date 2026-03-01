@@ -232,14 +232,6 @@ void ast_program_free(Program *prog)
  * Printing functions
  */
 
-static void print_indent(int level)
-{
-    for (int i = 0; i < level; i++)
-    {
-        printf("  ");
-    }
-}
-
 void ast_expr_print(ASTExpr *expr)
 {
     if (expr == NULL)

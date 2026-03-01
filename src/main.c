@@ -29,7 +29,7 @@ typedef struct
 
 static const VersionInfo g_version_info = {
     "Basic++ Interpreter",
-    "Version 0.2.3",
+    "Version 0.3.1",
     __DATE__ " " __TIME__};
 
 typedef struct
@@ -71,8 +71,38 @@ static void clear_program(StoredLine **lines, int *count, int *cap)
 
 static void list_program(StoredLine *lines, int count)
 {
+    /* Calculate width needed to right-align the largest line number */
+    int width = 1;
+    int tmp = count;
+    while (tmp >= 10)
+    {
+        width++;
+        tmp /= 10;
+    }
+
     for (int i = 0; i < count; i++)
-        termio_write_highlighted(lines[i].text ? lines[i].text : "");
+    {
+        const char *text = lines[i].text ? lines[i].text : "";
+
+        /* Strip leading old-style BASIC line number if present */
+        const char *display_text = text;
+        if (isdigit((unsigned char)*text))
+        {
+            char *after;
+            strtol(text, &after, 10);
+            if (after != text && isspace((unsigned char)*after))
+                display_text = after + 1;
+        }
+
+        /* Write sequential line number (right-aligned) in grey, then two spaces */
+        char num_buf[16];
+        snprintf(num_buf, sizeof(num_buf), "%*d  ", width, i + 1);
+        termio_set_write_color(COL_COMMENT);
+        termio_write(num_buf);
+
+        /* Write the code with syntax highlighting */
+        termio_write_highlighted(display_text);
+    }
 }
 
 static char *build_program_text(StoredLine *lines, int count)

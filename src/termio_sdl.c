@@ -9,7 +9,10 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <ctype.h>
 #include "termio.h"
+
+// Forward declarations
 
 #define TERM_COLS 132
 #define TERM_ROWS 32
@@ -578,6 +581,55 @@ void termio_present(void)
                 continue;
             chars = g_screen[screen_row];
             attrs = g_attr[screen_row];
+        }
+
+        /* Detect line-number gutter inline: skip right-aligned number + exactly 2 separator spaces */
+        int gutter = 0;
+        {
+            int p = 0;
+            while (p < TERM_COLS && chars[p] == ' ')
+                p++;
+            if (p < TERM_COLS && chars[p] >= '0' && chars[p] <= '9')
+            {
+                while (p < TERM_COLS && chars[p] >= '0' && chars[p] <= '9')
+                    p++;
+                /* Skip exactly the 2 separator spaces written after the number */
+                if (p + 1 < TERM_COLS && chars[p] == ' ' && chars[p + 1] == ' ')
+                    p += 2;
+                gutter = p;
+            }
+        }
+
+        /* Count leading spaces in the code area */
+        int indent = gutter;
+        while (indent < TERM_COLS && chars[indent] == ' ')
+            indent++;
+        int code_indent = indent - gutter;
+
+        /* Draw indent guides for indented code lines */
+        if (code_indent > 0 && indent < TERM_COLS && chars[indent] != ' ')
+        {
+            /* Monokai Pro comment grey #72696a — solid */
+            SDL_SetRenderDrawColor(g_renderer, 114, 105, 106, 255);
+
+            /* 2×2 dot centred in each indented column (skip tab-stop columns) */
+            for (int j = 1; j <= code_indent; j++)
+            {
+                if (j % 4 == 0)
+                    continue;
+                int x = (gutter + j) * g_char_width - g_char_width / 2;
+                int y = row * g_char_height + g_char_height / 2 - 1;
+                SDL_Rect dot = {x, y, 2, 2};
+                SDL_RenderFillRect(g_renderer, &dot);
+            }
+
+            /* Vertical guide line centred in each 4-space tab-stop column */
+            for (int level = 4; level <= code_indent; level += 4)
+            {
+                int x = (gutter + level) * g_char_width - g_char_width / 2;
+                SDL_RenderDrawLine(g_renderer, x, row * g_char_height,
+                                   x, (row + 1) * g_char_height - 1);
+            }
         }
 
         for (int col = 0; col < TERM_COLS; col++)
