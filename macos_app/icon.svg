@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">
+  <defs>
+    <!-- Dark background gradient: slightly lighter at top for macOS icon depth -->
+    <linearGradient id="bg_grad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%"   stop-color="#3d3131"/>
+      <stop offset="100%" stop-color="#1c1818"/>
+    </linearGradient>
+    <!-- Top-left warm accent glow -->
+    <radialGradient id="glow" cx="25%" cy="20%" r="60%">
+      <stop offset="0%"   stop-color="#fd6883" stop-opacity="0.18"/>
+      <stop offset="100%" stop-color="#fd6883" stop-opacity="0"/>
+    </radialGradient>
+    <!-- Inner shadow at bottom for ground plane depth -->
+    <linearGradient id="bottom_shadow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="60%"  stop-color="#000000" stop-opacity="0"/>
+      <stop offset="100%" stop-color="#000000" stop-opacity="0.35"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Background rounded rect -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#bg_grad)"/>
+  <!-- Warm glow layer -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#glow)"/>
+  <!-- Bottom depth shadow -->
+  <rect width="1024" height="1024" rx="220" ry="220" fill="url(#bottom_shadow)"/>
+
+  <!-- Prompt ">" in warm white — slightly left of center -->
+  <text
+    x="320"
+    y="618"
+    font-family="Menlo, 'Courier New', 'Lucida Console', monospace"
+    font-size="460"
+    font-weight="bold"
+    fill="#fff1f3"
+    text-anchor="middle">&#x3E;</text>
+
+  <!-- Cursor "_" in keyword pink — aligned right of ">" -->
+  <text
+    x="700"
+    y="618"
+    font-family="Menlo, 'Courier New', 'Lucida Console', monospace"
+    font-size="460"
+    font-weight="bold"
+    fill="#fd6883"
+    text-anchor="middle">_</text>
+</svg>

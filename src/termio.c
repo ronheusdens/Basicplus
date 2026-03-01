@@ -187,3 +187,14 @@ void termio_show_welcome(const char *name, const char *version)
     (void)version;
     /* No-op in stdio mode */
 }
+
+void termio_set_write_color(int color_idx)
+{
+    (void)color_idx; /* No-op in stdio mode */
+}
+
+void termio_write_highlighted(const char *line)
+{
+    if (line)
+        printf("%s\n", line);
+}

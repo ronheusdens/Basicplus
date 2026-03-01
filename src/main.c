@@ -72,9 +72,7 @@ static void clear_program(StoredLine **lines, int *count, int *cap)
 static void list_program(StoredLine *lines, int count)
 {
     for (int i = 0; i < count; i++)
-    {
-        termio_printf("%s\n", lines[i].text ? lines[i].text : "");
-    }
+        termio_write_highlighted(lines[i].text ? lines[i].text : "");
 }
 
 static char *build_program_text(StoredLine *lines, int count)
@@ -179,30 +177,30 @@ static int load_program_file(StoredLine **lines, int *count, int *cap, const cha
             buffer[--len] = '\0';
         }
 
-        char *p = buffer;
-        while (*p && isspace((unsigned char)*p))
-            p++;
+        /* Use trimmed pointer only for blank/comment/line-number detection */
+        char *trimmed = buffer;
+        while (*trimmed && isspace((unsigned char)*trimmed))
+            trimmed++;
 
-        if (*p == '\0' || *p == '!')
+        if (*trimmed == '\0' || *trimmed == '!')
             continue;
 
         /* Strip leading line number if present (backward compatibility) */
-        if (isdigit((unsigned char)*p))
+        if (isdigit((unsigned char)*trimmed))
         {
             char *after;
-            strtol(p, &after, 10);
-            if (after != p && isspace((unsigned char)*after))
+            strtol(trimmed, &after, 10);
+            if (after != trimmed && isspace((unsigned char)*after))
             {
-                p = after;
-                while (*p && isspace((unsigned char)*p))
-                    p++;
+                /* Old numbered line: skip number + one space, preserve any further indentation */
+                after++;
+                append_line(lines, count, cap, after);
+                continue;
             }
         }
 
-        if (*p == '\0')
-            continue;
-
-        append_line(lines, count, cap, p);
+        /* No line number: store buffer as-is, preserving original indentation */
+        append_line(lines, count, cap, buffer);
     }
 
     fclose(fp);

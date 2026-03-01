@@ -74,7 +74,7 @@
         pid_t pid = [task processIdentifier];
         NSRunningApplication *child =
             [NSRunningApplication runningApplicationWithProcessIdentifier:pid];
-        [child activateWithOptions:NSApplicationActivateIgnoringOtherApps];
+        [child activate];
     });
 
     [task waitUntilExit];

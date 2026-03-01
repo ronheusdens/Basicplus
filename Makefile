@@ -137,11 +137,14 @@ app: build
 	@echo "Creating Basic++ app bundle..."
 	@rm -rf "Basic++.app"
 	@mkdir -p "Basic++.app/Contents/MacOS"
-	@clang -O2 -framework Cocoa -o "Basic++.app/Contents/MacOS/Basic++" macos_app/Launcher.m
+	@mkdir -p "Basic++.app/Contents/Resources"
+	@clang -O2 -framework Cocoa -Wno-deprecated-declarations -o "Basic++.app/Contents/MacOS/Basic++" macos_app/Launcher.m
 	@cp $(BINARY) "Basic++.app/Contents/MacOS/basicpp"
 	@chmod +x "Basic++.app/Contents/MacOS/Basic++"
 	@chmod +x "Basic++.app/Contents/MacOS/basicpp"
-	@printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleDevelopmentRegion</key>\n  <string>en</string>\n  <key>CFBundleExecutable</key>\n  <string>Basic++</string>\n  <key>CFBundleIdentifier</key>\n  <string>com.ronheusdens.basicpp</string>\n  <key>CFBundleInfoDictionaryVersion</key>\n  <string>6.0</string>\n  <key>CFBundleName</key>\n  <string>Basic++</string>\n  <key>CFBundlePackageType</key>\n  <string>APPL</string>\n  <key>CFBundleShortVersionString</key>\n  <string>1.0</string>\n  <key>CFBundleVersion</key>\n  <string>1</string>\n  <key>NSHighResolutionCapable</key>\n  <true/>\n  <key>LSUIElement</key>\n  <true/>\n  <key>NSHumanReadableCopyright</key>\n  <string>Copyright © 2026. All rights reserved.</string>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeRole</key>\n      <string>Editor</string>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>basicpp</string>\n        <string>bas</string>\n      </array>\n      <key>CFBundleTypeName</key>\n      <string>Basic Source File</string>\n      <key>CFBundleTypeOSTypes</key>\n      <array>\n        <string>****</string>\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>' > "Basic++.app/Contents/Info.plist"
+	@echo "Building app icon..."
+	@python3 macos_app/make_icon.py && cp AppIcon.icns "Basic++.app/Contents/Resources/AppIcon.icns" && rm -f AppIcon.icns || echo "  (icon skipped — run: pip install cairosvg pillow)"
+	@printf '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0">\n<dict>\n  <key>CFBundleDevelopmentRegion</key>\n  <string>en</string>\n  <key>CFBundleExecutable</key>\n  <string>Basic++</string>\n  <key>CFBundleIdentifier</key>\n  <string>com.ronheusdens.basicpp</string>\n  <key>CFBundleInfoDictionaryVersion</key>\n  <string>6.0</string>\n  <key>CFBundleName</key>\n  <string>Basic++</string>\n  <key>CFBundleIconFile</key>\n  <string>AppIcon</string>\n  <key>CFBundlePackageType</key>\n  <string>APPL</string>\n  <key>CFBundleShortVersionString</key>\n  <string>1.0</string>\n  <key>CFBundleVersion</key>\n  <string>1</string>\n  <key>NSHighResolutionCapable</key>\n  <true/>\n  <key>LSUIElement</key>\n  <true/>\n  <key>NSHumanReadableCopyright</key>\n  <string>Copyright © 2026. All rights reserved.</string>\n  <key>CFBundleDocumentTypes</key>\n  <array>\n    <dict>\n      <key>CFBundleTypeRole</key>\n      <string>Editor</string>\n      <key>CFBundleTypeExtensions</key>\n      <array>\n        <string>basicpp</string>\n        <string>bas</string>\n      </array>\n      <key>CFBundleTypeName</key>\n      <string>Basic Source File</string>\n      <key>CFBundleTypeOSTypes</key>\n      <array>\n        <string>****</string>\n      </array>\n    </dict>\n  </array>\n</dict>\n</plist>' > "Basic++.app/Contents/Info.plist"
 	@echo "App bundle created: Basic++.app"
 
 install-app: app
@@ -163,13 +166,6 @@ install-app: app
 	@echo "Registering file associations..."
 	@/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/Support/lsregister -f "/Applications/Basic++.app" 2>/dev/null
 	@echo "✓ File associations registered"
-	@echo ""
-	@echo "Setup complete! To finish:"
-	@echo "  1. Open Finder"
-	@echo "  2. Right-click any .basicpp file"
-	@echo "  3. Select 'Get Info'"
-	@echo "  4. Change 'Open with:' to 'Basic++'"
-	@echo "  5. Click 'Change All'"
 
 clean:
 	@rm -rf $(OBJ_DIR) $(BUILD_DIR)

@@ -1,0 +1,8 @@
+   CLASS Point(X, Y)
+        PROCEDURE Distance(X2, Y2)
+            RETURN SQR((X2-X)^2 + (Y2-Y)^2)
+        END PROCEDURE
+    END CLASS
+    
+    LET P = NEW Point(3, 4)
+    PRINT P.Distance(6, 8)

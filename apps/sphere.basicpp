@@ -1,0 +1,68 @@
+! Sphere Metal Calculator
+! Calculates volume and weight of a metal sphere
+! Metals: Iron, Nickel, Aluminium
+
+CLASS Sphere(Radius)
+    PROCEDURE Volume()
+        RETURN (4.0 / 3.0) * 3.14159265358979 * Radius ^ 3
+    END PROCEDURE
+
+    PROCEDURE Weight(Density)
+        RETURN (4.0 / 3.0) * 3.14159265358979 * Radius ^ 3 * Density
+    END PROCEDURE
+END CLASS
+
+PRINT "================================"
+PRINT "   Sphere Metal Calculator"
+PRINT "================================"
+PRINT ""
+INPUT "Radius (cm): " R
+PRINT ""
+PRINT "Select metal:"
+PRINT "  1  Iron         7.874 g/cm3"
+PRINT "  2  Nickel       8.908 g/cm3"
+PRINT "  3  Aluminium    2.710 g/cm3"
+PRINT ""
+INPUT "Choice (1-3): " M
+PRINT ""
+PRINT "Select output:"
+PRINT "  1  Volume only"
+PRINT "  2  Weight only"
+PRINT "  3  Both"
+PRINT ""
+INPUT "Choice (1-3): " O
+
+IF M = 1 THEN
+    LET D = 7.874
+ENDIF
+IF M = 2 THEN
+    LET D = 8.908
+ENDIF
+IF M = 3 THEN
+    LET D = 2.710
+ENDIF
+
+LET S = NEW Sphere(R)
+
+PRINT ""
+PRINT "--------------------------------"
+
+IF O = 1 OR O = 3 THEN
+    PRINT "Volume  : "; S.Volume(); " cm3"
+ENDIF
+
+IF O = 2 OR O = 3 THEN
+    IF M = 1 THEN
+        PRINT "Metal   : Iron"
+    ENDIF
+    IF M = 2 THEN
+        PRINT "Metal   : Nickel"
+    ENDIF
+    IF M = 3 THEN
+        PRINT "Metal   : Aluminium"
+    ENDIF
+    PRINT "Weight  : "; S.Weight(D); " g"
+ENDIF
+
+PRINT "--------------------------------"
+END

@@ -9,6 +9,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include "termio.h"
 
 #define TERM_COLS 132
 #define TERM_ROWS 32
@@ -24,10 +25,196 @@ static float g_dpi_scale = 1.0f;
 
 /* Text buffer */
 static char g_screen[TERM_ROWS][TERM_COLS + 1];
+static Uint8 g_attr[TERM_ROWS][TERM_COLS]; /* per-cell color index */
+static Uint8 g_write_color = 0;            /* current write color  */
 static int g_cursor_row = 0;
 static int g_cursor_col = 0;
-static SDL_Color g_fg_color = {200, 200, 200, 255};
-static SDL_Color g_bg_color = {0, 0, 0, 255};
+/* Monokai Pro (Filter Ristretto) palette
+   bg: #2c2525  fg: #fff1f3 */
+static SDL_Color g_fg_color = {255, 241, 243, 255}; /* #fff1f3 warm white  */
+static SDL_Color g_bg_color = {44, 37, 37, 255};    /* #2c2525 dark brown */
+
+/* Syntax-highlight palette — same indices as COL_* in termio.h */
+static const SDL_Color g_palette[] = {
+    {255, 241, 243, 255}, /* 0 COL_NORMAL   #fff1f3 warm white  */
+    {253, 104, 131, 255}, /* 1 COL_KEYWORD  #fd6883 pink/red    */
+    {249, 204, 108, 255}, /* 2 COL_STRING   #f9cc6c yellow      */
+    {168, 169, 235, 255}, /* 3 COL_NUMBER   #a8a9eb lavender    */
+    {114, 105, 106, 255}, /* 4 COL_COMMENT  #72696a gray        */
+    {173, 218, 120, 255}, /* 5 COL_PROCNAME #adda78 green       */
+    {148, 138, 139, 255}, /* 6 COL_OPERATOR #948a8b muted grey  */
+};
+
+/* ------------------------------------------------------------------ */
+/* Scrollback buffer                                                     */
+/* ------------------------------------------------------------------ */
+#define SCROLLBACK_MAX 2000
+#define SCROLLBAR_W_PX 20 /* native pixels for the scrollbar track */
+
+static char g_scrollback[SCROLLBACK_MAX][TERM_COLS + 1];
+static Uint8 g_scrollback_attr[SCROLLBACK_MAX][TERM_COLS];
+static int g_scrollback_start = 0; /* circular buffer head index          */
+static int g_scrollback_count = 0; /* number of valid entries             */
+static int g_scroll_offset = 0;    /* 0 = live view (bottom)              */
+static int g_scroll_line = -1;     /* highlighted row (-1 = none)         */
+
+/* Push g_screen row 0 into the scrollback ring before evicting it. */
+static void scrollback_push(void)
+{
+    int idx;
+    if (g_scrollback_count < SCROLLBACK_MAX)
+    {
+        idx = (g_scrollback_start + g_scrollback_count) % SCROLLBACK_MAX;
+        g_scrollback_count++;
+    }
+    else
+    {
+        /* Oldest entry overwritten — advance start */
+        idx = g_scrollback_start;
+        g_scrollback_start = (g_scrollback_start + 1) % SCROLLBACK_MAX;
+    }
+    memcpy(g_scrollback[idx], g_screen[0], TERM_COLS);
+    g_scrollback[idx][TERM_COLS] = '\0';
+    memcpy(g_scrollback_attr[idx], g_attr[0], TERM_COLS);
+
+    /* If user is viewing history, keep the view stable */
+    if (g_scroll_offset > 0)
+    {
+        g_scroll_offset++;
+        if (g_scroll_offset > g_scrollback_count)
+            g_scroll_offset = g_scrollback_count;
+    }
+}
+
+/* Adjust scroll offset; clamp to valid range. */
+static void scroll_by(int delta)
+{
+    g_scroll_offset += delta;
+    if (g_scroll_offset < 0)
+        g_scroll_offset = 0;
+    if (g_scroll_offset > g_scrollback_count)
+        g_scroll_offset = g_scrollback_count;
+}
+
+/* Accumulated fractional scroll from trackpad smooth events */
+static float g_scroll_accum = 0.0f;
+
+/* Returns 1 if the event was a scroll action and was consumed. */
+static int handle_scroll_event(const SDL_Event *e)
+{
+    if (e->type == SDL_MOUSEWHEEL)
+    {
+        /* Use preciseY (SDL 2.0.18+) for smooth trackpad scrolling;
+           each trackpad tick sends a small float rather than integer 1. */
+        float dy = e->wheel.preciseY;
+        if (e->wheel.direction == SDL_MOUSEWHEEL_FLIPPED)
+            dy = -dy;
+        g_scroll_accum += dy * 3.0f;
+        int steps = (int)g_scroll_accum;
+        if (steps != 0)
+        {
+            scroll_by(steps);
+            g_scroll_accum -= (float)steps;
+        }
+        return 1;
+    }
+    if (e->type == SDL_MOUSEBUTTONDOWN && e->button.button == SDL_BUTTON_LEFT)
+    {
+        /* Click inside the scrollbar track -> jump to that position */
+        if (!g_renderer)
+            return 0;
+        int out_w, out_h;
+        SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
+        int sb_w = (int)(SCROLLBAR_W_PX * g_dpi_scale);
+        /* SDL mouse coords are logical pixels; convert to physical */
+        int click_x = (int)(e->button.x * g_dpi_scale);
+        int click_y = (int)(e->button.y * g_dpi_scale);
+        if (click_x >= out_w - sb_w && out_h > 0)
+        {
+            float frac = 1.0f - (float)click_y / (float)out_h;
+            int total_lines = g_scrollback_count + TERM_ROWS;
+            float max_offset = (float)(total_lines - TERM_ROWS);
+            g_scroll_offset = (int)(frac * max_offset);
+            if (g_scroll_offset < 0)
+                g_scroll_offset = 0;
+            if (g_scroll_offset > g_scrollback_count)
+                g_scroll_offset = g_scrollback_count;
+            return 1;
+        }
+    }
+    if (e->type == SDL_KEYDOWN)
+    {
+        switch (e->key.keysym.sym)
+        {
+        case SDLK_PAGEUP:
+            scroll_by(TERM_ROWS);
+            g_scroll_line = 0;
+            return 1;
+        case SDLK_PAGEDOWN:
+            scroll_by(-TERM_ROWS);
+            if (g_scroll_offset == 0)
+                g_scroll_line = -1;
+            else
+                g_scroll_line = TERM_ROWS - 1;
+            return 1;
+        case SDLK_HOME:
+            scroll_by(g_scrollback_count);
+            g_scroll_line = 0;
+            return 1;
+        case SDLK_END:
+            g_scroll_offset = 0;
+            g_scroll_line = -1;
+            return 1;
+        case SDLK_ESCAPE:
+            if (g_scroll_offset > 0)
+            {
+                g_scroll_offset = 0;
+                g_scroll_line = -1;
+                return 1;
+            }
+            break;
+        case SDLK_UP:
+            if (g_scroll_offset == 0 && g_scroll_line < 0)
+            {
+                /* Enter scroll mode: expose one line of history at bottom */
+                scroll_by(1);
+                g_scroll_line = TERM_ROWS - 1;
+                return 1;
+            }
+            if (g_scroll_offset > 0)
+            {
+                if (g_scroll_line > 0)
+                    g_scroll_line--;
+                else
+                {
+                    scroll_by(1); /* scroll view up, keep line at top */
+                    g_scroll_line = 0;
+                }
+                return 1;
+            }
+            break;
+        case SDLK_DOWN:
+            if (g_scroll_offset > 0)
+            {
+                if (g_scroll_line < TERM_ROWS - 1)
+                    g_scroll_line++;
+                else
+                {
+                    scroll_by(-1); /* scroll view down */
+                    if (g_scroll_offset == 0)
+                        g_scroll_line = -1; /* back to live */
+                    else
+                        g_scroll_line = TERM_ROWS - 1;
+                }
+                return 1;
+            }
+            break;
+        default:
+            break;
+        }
+    }
+    return 0;
+}
 
 int termio_init(int cols, int rows, int scale)
 {
@@ -154,7 +341,10 @@ int termio_init(int cols, int rows, int scale)
 
     /* Initialize screen buffer */
     for (int i = 0; i < TERM_ROWS; i++)
+    {
         memset(g_screen[i], ' ', TERM_COLS);
+        memset(g_attr[i], 0, TERM_COLS);
+    }
 
     g_sdl_enabled = 1;
     g_cursor_row = 0;
@@ -186,10 +376,15 @@ void termio_clear(void)
         return;
 
     for (int i = 0; i < TERM_ROWS; i++)
+    {
         memset(g_screen[i], ' ', TERM_COLS);
+        memset(g_attr[i], 0, TERM_COLS);
+    }
 
     g_cursor_row = 0;
     g_cursor_col = 0;
+    g_scroll_offset = 0; /* jump to live view on clear */
+    g_scroll_line = -1;
 }
 
 void termio_set_cursor(int row, int col)
@@ -236,16 +431,34 @@ void termio_write_char(char c)
 
         if (g_cursor_row >= TERM_ROWS)
         {
-            /* Scroll up */
+            /* Save top row to scrollback, then scroll up */
+            scrollback_push();
             for (int i = 0; i < TERM_ROWS - 1; i++)
+            {
                 memcpy(g_screen[i], g_screen[i + 1], TERM_COLS);
+                memcpy(g_attr[i], g_attr[i + 1], TERM_COLS);
+            }
             memset(g_screen[TERM_ROWS - 1], ' ', TERM_COLS);
+            memset(g_attr[TERM_ROWS - 1], 0, TERM_COLS);
             g_cursor_row = TERM_ROWS - 1;
         }
     }
     else if (c == '\r')
     {
         g_cursor_col = 0;
+    }
+    else if (c == '\t')
+    {
+        /* Advance to next 4-column tab stop */
+        int next_stop = ((g_cursor_col / 4) + 1) * 4;
+        if (next_stop > TERM_COLS)
+            next_stop = TERM_COLS;
+        while (g_cursor_col < next_stop)
+        {
+            g_screen[g_cursor_row][g_cursor_col] = ' ';
+            g_attr[g_cursor_row][g_cursor_col] = 0;
+            g_cursor_col++;
+        }
     }
     else
     {
@@ -255,15 +468,21 @@ void termio_write_char(char c)
             g_cursor_col = 0;
 
             if (g_cursor_row >= TERM_ROWS)
-            {
+            { /* Save top row to scrollback, then scroll up */
+                scrollback_push();
                 for (int i = 0; i < TERM_ROWS - 1; i++)
+                {
                     memcpy(g_screen[i], g_screen[i + 1], TERM_COLS);
+                    memcpy(g_attr[i], g_attr[i + 1], TERM_COLS);
+                }
                 memset(g_screen[TERM_ROWS - 1], ' ', TERM_COLS);
+                memset(g_attr[TERM_ROWS - 1], 0, TERM_COLS);
                 g_cursor_row = TERM_ROWS - 1;
             }
         }
 
         g_screen[g_cursor_row][g_cursor_col] = c;
+        g_attr[g_cursor_row][g_cursor_col] = g_write_color;
         g_cursor_col++;
     }
 }
@@ -308,31 +527,115 @@ void termio_present(void)
     SDL_SetRenderDrawColor(g_renderer, g_bg_color.r, g_bg_color.g, g_bg_color.b, 255);
     SDL_RenderClear(g_renderer);
 
+    /* Focused-line highlight (drawn first, behind text) */
+    if (g_scroll_line >= 0 && g_scroll_offset > 0)
+    {
+        int out_w, out_h_tmp;
+        SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h_tmp);
+        SDL_Rect hl = {0, g_scroll_line * g_char_height, out_w, g_char_height};
+        SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(g_renderer, 255, 241, 243, 28); /* faint warm white */
+        SDL_RenderFillRect(g_renderer, &hl);
+        /* Left-edge accent bar */
+        SDL_Rect bar = {0, g_scroll_line * g_char_height, (int)(3 * g_dpi_scale), g_char_height};
+        SDL_SetRenderDrawColor(g_renderer, 253, 104, 131, 180); /* COL_KEYWORD pink */
+        SDL_RenderFillRect(g_renderer, &bar);
+        SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
+    }
+
+    /* Determine first absolute line to display (scrollback + screen unified) */
+    int first_line = g_scrollback_count - g_scroll_offset;
+
     for (int row = 0; row < TERM_ROWS; row++)
     {
+        int abs_line = first_line + row;
+        const char *chars;
+        const Uint8 *attrs;
+        char blank_chars[TERM_COLS + 1];
+        Uint8 blank_attrs[TERM_COLS];
+
+        if (abs_line < 0)
+        {
+            /* Above all history — blank row */
+            memset(blank_chars, ' ', TERM_COLS);
+            blank_chars[TERM_COLS] = 0;
+            memset(blank_attrs, 0, TERM_COLS);
+            chars = blank_chars;
+            attrs = blank_attrs;
+        }
+        else if (abs_line < g_scrollback_count)
+        {
+            /* From scrollback ring  */
+            int sb_idx = (g_scrollback_start + abs_line) % SCROLLBACK_MAX;
+            chars = g_scrollback[sb_idx];
+            attrs = g_scrollback_attr[sb_idx];
+        }
+        else
+        {
+            /* From live screen */
+            int screen_row = abs_line - g_scrollback_count;
+            if (screen_row >= TERM_ROWS)
+                continue;
+            chars = g_screen[screen_row];
+            attrs = g_attr[screen_row];
+        }
+
         for (int col = 0; col < TERM_COLS; col++)
         {
-            char c = g_screen[row][col];
+            char c = chars[col];
+            if (c == '\0')
+                break;
             if (c == ' ')
                 continue;
 
             char text[2] = {c, 0};
-            SDL_Surface *surf = TTF_RenderText_Blended(g_font, text, g_fg_color);
+            Uint8 ci = attrs[col];
+            SDL_Color cell_color = g_palette[ci < 7 ? ci : 0];
+            SDL_Surface *surf = TTF_RenderText_Blended(g_font, text, cell_color);
             if (!surf)
                 continue;
 
             SDL_Texture *tex = SDL_CreateTextureFromSurface(g_renderer, surf);
-            /* Render at native pixel coordinates for HiDPI sharpness */
             SDL_Rect rect = {
                 (int)(col * g_char_width),
                 (int)(row * g_char_height),
                 g_char_width,
                 g_char_height};
             SDL_RenderCopy(g_renderer, tex, NULL, &rect);
-
             SDL_DestroyTexture(tex);
             SDL_FreeSurface(surf);
         }
+    }
+
+    /* Draw scrollbar when there is scrollback content */
+    if (g_scrollback_count > 0)
+    {
+        int out_w, out_h;
+        SDL_GetRendererOutputSize(g_renderer, &out_w, &out_h);
+        int sb_w = (int)(SCROLLBAR_W_PX * g_dpi_scale);
+
+        /* Track */
+        SDL_Rect track = {out_w - sb_w, 0, sb_w, out_h};
+        SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_BLEND);
+        SDL_SetRenderDrawColor(g_renderer, 60, 50, 50, 180);
+        SDL_RenderFillRect(g_renderer, &track);
+
+        /* Thumb */
+        int total_lines = g_scrollback_count + TERM_ROWS;
+        float thumb_frac = (float)TERM_ROWS / (float)total_lines;
+        int thumb_h = (int)(out_h * thumb_frac);
+        if (thumb_h < 16)
+            thumb_h = 16;
+
+        float max_offset = (float)(total_lines - TERM_ROWS);
+        float scroll_frac = (max_offset > 0) ? ((float)g_scroll_offset / max_offset) : 0.0f;
+        /* offset=0 -> thumb at bottom; offset=max -> thumb at top */
+        int thumb_y = (int)((1.0f - scroll_frac) * (float)(out_h - thumb_h));
+
+        SDL_Rect thumb = {out_w - sb_w + 2, thumb_y + 2, sb_w - 4, thumb_h - 4};
+        SDL_SetRenderDrawColor(g_renderer, 180, 165, 165, 200);
+        SDL_RenderFillRect(g_renderer, &thumb);
+        SDL_SetRenderDrawBlendMode(g_renderer, SDL_BLENDMODE_NONE);
     }
 
     SDL_RenderPresent(g_renderer);
@@ -342,15 +645,15 @@ void termio_set_colors(int fg, int bg)
 {
     if (fg == 1 && bg == 0)
     {
-        /* WOB: white on black */
-        g_fg_color = (SDL_Color){200, 200, 200, 255};
-        g_bg_color = (SDL_Color){0, 0, 0, 255};
+        /* WOB: restore Ristretto defaults */
+        g_fg_color = (SDL_Color){255, 241, 243, 255}; /* #fff1f3 */
+        g_bg_color = (SDL_Color){44, 37, 37, 255};    /* #2c2525 */
     }
     else if (fg == 0 && bg == 1)
     {
-        /* BOW: black on white */
-        g_fg_color = (SDL_Color){20, 20, 20, 255};
-        g_bg_color = (SDL_Color){220, 220, 220, 255};
+        /* BOW: inverted — near-white background, dark text */
+        g_fg_color = (SDL_Color){44, 37, 37, 255};    /* #2c2525 */
+        g_bg_color = (SDL_Color){255, 241, 243, 255}; /* #fff1f3 */
     }
     termio_present();
 }
@@ -365,6 +668,7 @@ void termio_handle_events(void)
     {
         if (event.type == SDL_QUIT)
             exit(0);
+        handle_scroll_event(&event);
     }
 }
 
@@ -404,6 +708,10 @@ int termio_readline(char *buf, int maxlen)
         {
             if (event.type == SDL_QUIT)
                 exit(0);
+
+            /* Scroll wheel / PgUp / PgDn scroll history without disrupting input */
+            if (handle_scroll_event(&event))
+                continue;
 
             if (event.type == SDL_KEYDOWN)
             {
@@ -526,80 +834,177 @@ void termio_render_graphics(void)
 }
 void termio_show_welcome(const char *name, const char *version)
 {
-    if (!g_sdl_enabled)
+    if (!g_sdl_enabled || !g_renderer || !g_font)
         return;
 
-    /* Clear screen */
-    termio_clear();
+    /* Welcome text lines (with proper UTF-8 support) */
+    const char *lines[] = {
+        name,
+        version,
+        "© 2026 Meltingcaps.com",
+        "",
+        "[Press any key to continue]"};
+    int num_lines = 5;
 
-    /* Center text vertically and horizontally */
+    /* Starting row for typewriter effect (vertically centered) */
     int start_row = 8;
-    int lines[4];
-    lines[0] = start_row;     /* Name */
-    lines[1] = start_row + 2; /* Version */
-    lines[2] = start_row + 4; /* Copyright */
-    lines[3] = start_row + 7; /* Prompt */
 
-    /* Draw welcome text */
-    char line_text[TERM_COLS + 1];
+    /* Track which line and character we're currently typing */
+    int current_line = 0;
+    int current_char = 0;
+    int display_complete = 0;
 
-    /* Name centered */
-    snprintf(line_text, sizeof(line_text), "%*s", (TERM_COLS + (int)strlen(name)) / 2, name);
-    for (int i = 0; i < TERM_COLS && line_text[i]; i++)
-        g_screen[lines[0]][i] = line_text[i];
-
-    /* Version centered */
-    snprintf(line_text, sizeof(line_text), "%*s", (TERM_COLS + (int)strlen(version)) / 2, version);
-    for (int i = 0; i < TERM_COLS && line_text[i]; i++)
-        g_screen[lines[1]][i] = line_text[i];
-
-    /* Copyright centered */
-    const char *copyright = "2026. Meltingcaps.com";
-    snprintf(line_text, sizeof(line_text), "%*s", (TERM_COLS + (int)strlen(copyright)) / 2, copyright);
-    for (int i = 0; i < TERM_COLS && line_text[i]; i++)
-        g_screen[lines[2]][i] = line_text[i];
-
-    /* Prompt */
-    const char *prompt = "[Press Ctrl-C to exit]";
-    snprintf(line_text, sizeof(line_text), "%*s", (TERM_COLS + (int)strlen(prompt)) / 2, prompt);
-    for (int i = 0; i < TERM_COLS && line_text[i]; i++)
-        g_screen[lines[3]][i] = line_text[i];
-
-    /* Display and wait for Ctrl-C */
-    int done = 0;
+    /* Animation timing */
+    Uint32 last_char_time = SDL_GetTicks();
+    Uint32 last_blink_time = SDL_GetTicks();
     int blink_state = 0;
-    Uint32 last_blink = SDL_GetTicks();
+    Uint32 char_delay_ms = 40; /* Time between character reveals */
+
+    int done = 0;
 
     while (!done)
     {
-        termio_present();
+        Uint32 now = SDL_GetTicks();
 
+        /* If not yet complete, advance character animation */
+        if (!display_complete && (now - last_char_time >= char_delay_ms))
+        {
+            last_char_time = now;
+            current_char++;
+
+            /* Check if we've displayed all chars in current line */
+            if (current_char > (int)strlen(lines[current_line]))
+            {
+                current_char = 0;
+                current_line++;
+
+                /* Skip empty line briefly, then move to next real line */
+                if (current_line >= num_lines)
+                {
+                    display_complete = 1;
+                }
+            }
+        }
+
+        /* Blink cursor effect */
+        if (now - last_blink_time > 500)
+        {
+            blink_state = !blink_state;
+            last_blink_time = now;
+        }
+
+        /* Render using SDL directly (bypass g_screen for UTF-8 support) */
+        SDL_SetRenderDrawColor(g_renderer, g_bg_color.r, g_bg_color.g, g_bg_color.b, 255);
+        SDL_RenderClear(g_renderer);
+
+        int renderer_w, renderer_h;
+        SDL_GetRendererOutputSize(g_renderer, &renderer_w, &renderer_h);
+
+        /* Draw lines that have been typed so far */
+        for (int i = 0; i < current_line; i++)
+        {
+            const char *line = lines[i];
+            int y = (int)((start_row + i) * g_char_height);
+
+            SDL_Color line_color = g_palette[0]; /* Normal color */
+            if (i == 0)
+                line_color = g_palette[COL_KEYWORD]; /* Name in pink */
+            else if (i == 2)
+                line_color = g_palette[COL_COMMENT]; /* Copyright in gray */
+
+            /* Render full line using SDL_ttf UTF-8 support */
+            SDL_Surface *surf = TTF_RenderUTF8_Blended(g_font, line, line_color);
+            if (surf)
+            {
+                SDL_Texture *tex = SDL_CreateTextureFromSurface(g_renderer, surf);
+                if (tex)
+                {
+                    int w = surf->w;
+                    int x = (renderer_w - w) / 2; /* Center horizontally */
+                    SDL_Rect rect = {x, y, w, g_char_height};
+                    SDL_RenderCopy(g_renderer, tex, NULL, &rect);
+                    SDL_DestroyTexture(tex);
+                }
+                SDL_FreeSurface(surf);
+            }
+        }
+
+        /* Draw current line being typed */
+        if (!display_complete && current_line < num_lines)
+        {
+            const char *line = lines[current_line];
+            int y = (int)((start_row + current_line) * g_char_height);
+
+            SDL_Color line_color = g_palette[0];
+            if (current_line == 0)
+                line_color = g_palette[COL_KEYWORD];
+            else if (current_line == 2)
+                line_color = g_palette[COL_COMMENT];
+
+            /* Create partial string for current typing progress */
+            char partial[256];
+            int copy_len = (current_char < (int)sizeof(partial) - 1) ? current_char : (int)sizeof(partial) - 1;
+            strncpy(partial, line, copy_len);
+            partial[copy_len] = 0;
+
+            /* Render partial line */
+            if (copy_len > 0)
+            {
+                SDL_Surface *surf = TTF_RenderUTF8_Blended(g_font, partial, line_color);
+                if (surf)
+                {
+                    SDL_Texture *tex = SDL_CreateTextureFromSurface(g_renderer, surf);
+                    if (tex)
+                    {
+                        int w = surf->w;
+                        int x = (renderer_w - (int)strlen(line) * g_char_width / 2) / 2; /* Approximate centering */
+                        SDL_Rect rect = {x, y, w, g_char_height};
+                        SDL_RenderCopy(g_renderer, tex, NULL, &rect);
+                        SDL_DestroyTexture(tex);
+                    }
+                    SDL_FreeSurface(surf);
+                }
+            }
+
+            /* Draw blinking cursor */
+            if (blink_state && current_char < (int)strlen(line))
+            {
+                SDL_Surface *surf = TTF_RenderUTF8_Blended(g_font, partial, line_color);
+                if (surf)
+                {
+                    int cursor_x = (renderer_w - (int)strlen(line) * g_char_width / 2) / 2 + surf->w + 2;
+                    SDL_Rect cursor = {cursor_x, y + (int)(g_char_height * 0.7), 2, (int)(g_char_height * 0.25)};
+                    SDL_SetRenderDrawColor(g_renderer, line_color.r, line_color.g, line_color.b, 255);
+                    SDL_RenderFillRect(g_renderer, &cursor);
+                    SDL_FreeSurface(surf);
+                }
+            }
+        }
+
+        SDL_RenderPresent(g_renderer);
+
+        /* Handle input */
         SDL_Event event;
-        if (SDL_WaitEventTimeout(&event, 100))
+        if (SDL_WaitEventTimeout(&event, 50))
         {
             if (event.type == SDL_QUIT)
                 exit(0);
             if (event.type == SDL_KEYDOWN)
             {
-                if (event.key.keysym.sym == SDLK_c &&
-                    (event.key.keysym.mod & KMOD_CTRL))
+                /* Any key dismisses / skips to final state */
+                if (!display_complete)
                 {
-                    done = 1;
+                    /* Skip animation, show everything immediately */
+                    display_complete = 1;
+                    current_line = num_lines - 1;
+                    current_char = (int)strlen(lines[current_line]);
                 }
                 else
                 {
-                    /* Any other key also dismisses */
+                    /* Already complete, exit welcome screen */
                     done = 1;
                 }
             }
-        }
-
-        /* Blink effect for waiting */
-        Uint32 now = SDL_GetTicks();
-        if (now - last_blink > 500)
-        {
-            blink_state = !blink_state;
-            last_blink = now;
         }
     }
 
@@ -607,4 +1012,150 @@ void termio_show_welcome(const char *name, const char *version)
     termio_clear();
     g_cursor_row = 0;
     g_cursor_col = 0;
+}
+
+/* ------------------------------------------------------------------ */
+/* Syntax highlighting helpers                                          */
+/* ------------------------------------------------------------------ */
+
+void termio_set_write_color(int color_idx)
+{
+    if (!g_sdl_enabled)
+        return;
+    if (color_idx < 0 || color_idx > 6)
+        color_idx = 0;
+    g_write_color = (Uint8)color_idx;
+}
+
+/* Basic++ keywords that should appear in COL_KEYWORD */
+static const char *s_keywords[] = {
+    "PROCEDURE", "END", "CLASS", "NEW", "RETURN",
+    "IF", "THEN", "ELSE", "ELSIF", "ENDIF",
+    "FOR", "TO", "STEP", "NEXT",
+    "WHILE", "WEND", "DO", "UNTIL", "LOOP",
+    "PRINT", "INPUT", "LET", "DIM",
+    "READ", "DATA", "GOTO", "GOSUB",
+    "ON", "STOP", "REM", "DEF",
+    "AND", "OR", "NOT", "MOD",
+    "TRUE", "FALSE", "SELF",
+    NULL};
+
+static int is_keyword(const char *start, int len)
+{
+    for (int i = 0; s_keywords[i]; i++)
+    {
+        int klen = (int)strlen(s_keywords[i]);
+        if (klen == len && strncasecmp(start, s_keywords[i], len) == 0)
+            return 1;
+    }
+    return 0;
+}
+
+void termio_write_highlighted(const char *line)
+{
+    if (!line)
+        return;
+    if (!g_sdl_enabled)
+    {
+        /* plain terminal fallback */
+        termio_write(line);
+        termio_write_char('\n');
+        return;
+    }
+
+    /* Track whether the previous keyword was PROCEDURE or CLASS
+       so the next identifier gets COL_PROCNAME */
+    int next_is_procname = 0;
+
+    const char *p = line;
+    while (*p)
+    {
+        /* Comment: ! to end of line */
+        if (*p == '!')
+        {
+            termio_set_write_color(COL_COMMENT);
+            while (*p)
+                termio_write_char(*p++);
+            break;
+        }
+
+        /* String literal */
+        if (*p == '"')
+        {
+            termio_set_write_color(COL_STRING);
+            termio_write_char(*p++);
+            while (*p && *p != '"')
+                termio_write_char(*p++);
+            if (*p == '"')
+                termio_write_char(*p++);
+            termio_set_write_color(COL_NORMAL);
+            continue;
+        }
+
+        /* Number: digit or leading dot-digit */
+        if ((*p >= '0' && *p <= '9') ||
+            (*p == '.' && *(p + 1) >= '0' && *(p + 1) <= '9'))
+        {
+            termio_set_write_color(COL_NUMBER);
+            while ((*p >= '0' && *p <= '9') || *p == '.' || *p == 'e' || *p == 'E' ||
+                   (((*p == '+' || *p == '-') && (*(p - 1) == 'e' || *(p - 1) == 'E'))))
+                termio_write_char(*p++);
+            termio_set_write_color(COL_NORMAL);
+            continue;
+        }
+
+        /* Identifier or keyword */
+        if ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') || *p == '_')
+        {
+            const char *start = p;
+            while ((*p >= 'A' && *p <= 'Z') || (*p >= 'a' && *p <= 'z') ||
+                   (*p >= '0' && *p <= '9') || *p == '_')
+                p++;
+            int len = (int)(p - start);
+
+            int color;
+            if (next_is_procname)
+            {
+                color = COL_PROCNAME;
+                next_is_procname = 0;
+            }
+            else if (is_keyword(start, len))
+            {
+                color = COL_KEYWORD;
+                /* peek: if PROCEDURE or CLASS, next ident is a proc name */
+                if (strncasecmp(start, "PROCEDURE", 9) == 0 ||
+                    strncasecmp(start, "CLASS", 5) == 0)
+                    next_is_procname = 1;
+            }
+            else
+            {
+                color = COL_NORMAL;
+            }
+
+            termio_set_write_color(color);
+            for (const char *q = start; q < p; q++)
+                termio_write_char(*q);
+            termio_set_write_color(COL_NORMAL);
+            continue;
+        }
+
+        /* Operators / punctuation */
+        if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '^' ||
+            *p == '=' || *p == '<' || *p == '>' || *p == '(' || *p == ')' ||
+            *p == '[' || *p == ']' || *p == ',' || *p == ':' || *p == ';')
+        {
+            termio_set_write_color(COL_OPERATOR);
+            termio_write_char(*p++);
+            termio_set_write_color(COL_NORMAL);
+            continue;
+        }
+
+        /* Anything else — whitespace, dots, etc. */
+        termio_set_write_color(COL_NORMAL);
+        termio_write_char(*p++);
+    }
+
+    /* End line */
+    termio_set_write_color(COL_NORMAL);
+    termio_write_char('\n');
 }

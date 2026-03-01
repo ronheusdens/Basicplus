@@ -42,6 +42,21 @@ void termio_sound_harmonics(int base_freq, const int *harmonics, const double *i
 /* Set text colors: fg/bg are 0=black, 1=white */
 void termio_set_colors(int fg, int bg);
 
+/* Syntax-highlight color indices (Monokai Pro Filter Ristretto — exact theme values) */
+#define COL_NORMAL 0   /* #fff1f3 warm white  */
+#define COL_KEYWORD 1  /* #fd6883 pink/red    */
+#define COL_STRING 2   /* #f9cc6c yellow      */
+#define COL_NUMBER 3   /* #a8a9eb lavender    */
+#define COL_COMMENT 4  /* #72696a gray        */
+#define COL_PROCNAME 5 /* #adda78 green       */
+#define COL_OPERATOR 6 /* #948a8b muted grey  */
+
+/* Set the current write color (used by subsequent termio_write / termio_write_char calls) */
+void termio_set_write_color(int color_idx);
+
+/* Write a line of code with syntax highlighting and a trailing newline */
+void termio_write_highlighted(const char *line);
+
 /* Display welcome screen with version information (SDL2 only) */
 void termio_show_welcome(const char *name, const char *version);
 

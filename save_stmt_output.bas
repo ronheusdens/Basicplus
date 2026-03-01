@@ -1,3 +1,3 @@
-10 PRINT "SAVE STMT TEST"
-20 SAVE "save_stmt_output.bas"
-30 PRINT "DONE"
+PRINT "SAVE STMT TEST"
+SAVE "save_stmt_output.bas"
+PRINT "DONE"
